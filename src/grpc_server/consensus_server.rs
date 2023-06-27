@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use statig::awaitable::InitializedStateMachine;
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use cita_cloud_proto::{
@@ -23,16 +27,23 @@ use cita_cloud_proto::{
     status_code::StatusCodeEnum,
 };
 
-use crate::core::controller::Controller;
+use crate::core::{controller::Controller, state_machine::ControllerStateMachine};
 
 //grpc server for Consensus2ControllerService
 pub struct Consensus2ControllerServer {
     controller: Controller,
+    controller_state_machine: Arc<RwLock<InitializedStateMachine<ControllerStateMachine>>>,
 }
 
 impl Consensus2ControllerServer {
-    pub(crate) fn new(controller: Controller) -> Self {
-        Consensus2ControllerServer { controller }
+    pub(crate) fn new(
+        controller: Controller,
+        controller_state_machine: Arc<RwLock<InitializedStateMachine<ControllerStateMachine>>>,
+    ) -> Self {
+        Consensus2ControllerServer {
+            controller,
+            controller_state_machine,
+        }
     }
 }
 
@@ -46,7 +57,11 @@ impl Consensus2ControllerService for Consensus2ControllerServer {
         cloud_util::tracer::set_parent(&request);
         debug!("get_proposal request: {:?}", request);
 
-        match self.controller.chain_get_proposal().await {
+        match self
+            .controller
+            .chain_get_proposal(self.controller_state_machine.read().await.state())
+            .await
+        {
             Ok((height, data)) => {
                 let proposal = Proposal { height, data };
                 Ok(Response::new(ProposalResponse {
@@ -102,10 +117,7 @@ impl Consensus2ControllerService for Consensus2ControllerServer {
         let data = proposal.data;
         let proof = proposal_with_proof.proof;
 
-        let config = {
-            let rd = self.controller.auditor.read().await;
-            rd.get_system_config()
-        };
+        let config = self.controller.auditor.read().await.get_system_config();
 
         let result = if height != u64::MAX {
             self.controller

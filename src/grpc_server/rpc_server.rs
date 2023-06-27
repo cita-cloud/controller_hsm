@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use statig::awaitable::InitializedStateMachine;
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use cita_cloud_proto::controller::CrossChainProof;
@@ -24,6 +28,7 @@ use cita_cloud_proto::{
     status_code::StatusCodeEnum,
 };
 
+use crate::core::state_machine::ControllerStateMachine;
 use crate::{
     core::{
         controller::Controller,
@@ -35,11 +40,18 @@ use crate::{
 // grpc server of RPC
 pub struct RPCServer {
     controller: Controller,
+    controller_state_machine: Arc<RwLock<InitializedStateMachine<ControllerStateMachine>>>,
 }
 
 impl RPCServer {
-    pub(crate) fn new(controller: Controller) -> Self {
-        RPCServer { controller }
+    pub(crate) fn new(
+        controller: Controller,
+        controller_state_machine: Arc<RwLock<InitializedStateMachine<ControllerStateMachine>>>,
+    ) -> Self {
+        RPCServer {
+            controller,
+            controller_state_machine,
+        }
     }
 }
 
@@ -413,7 +425,7 @@ impl RpcService for RPCServer {
 
         Ok(Response::new(
             self.controller
-                .rpc_get_node_status(request.into_inner())
+                .rpc_get_node_status(self.controller_state_machine.read().await.state())
                 .await
                 .map_err(|e| Status::invalid_argument(e.to_string()))?,
         ))

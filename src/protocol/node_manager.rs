@@ -177,7 +177,7 @@ impl MisbehaviorStatus {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct NodeAddress(pub u64);
 
 impl Display for NodeAddress {
@@ -204,6 +204,8 @@ fn test_node_address_display() {
 #[derive(Clone, Default)]
 pub struct NodeManager {
     pub nodes: Arc<RwLock<HashMap<NodeAddress, ChainStatus>>>,
+
+    pub nodes_pre_status: Arc<RwLock<HashMap<NodeAddress, ChainStatus>>>,
 
     pub misbehavior_nodes: Arc<RwLock<HashMap<NodeAddress, MisbehaviorStatus>>>,
 

@@ -12,6 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod controller_msg_type;
-pub(crate) mod node_manager;
-pub(crate) mod sync_manager;
+// inner health check
+pub struct InnerHealthCheck {
+    pub current_height: u64,
+    // only above retry_limit allow broadcast retry, retry timing is 1, 1, 2, 4, 8...2^n
+    pub retry_limit: u64,
+    // tick count interval times
+    pub tick: u64,
+}
+
+impl Default for InnerHealthCheck {
+    fn default() -> Self {
+        Self {
+            current_height: u64::MAX,
+            retry_limit: 0,
+            tick: 0,
+        }
+    }
+}

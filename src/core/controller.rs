@@ -13,18 +13,15 @@
 // limitations under the License.
 
 use prost::Message;
-use std::{cmp::Ordering, collections::HashMap, sync::Arc, time::Duration};
-use tokio::{
-    sync::{mpsc, RwLock},
-    time,
-};
+use std::{cmp::Ordering, sync::Arc, time::Duration};
+use tokio::{sync::RwLock, time};
 
 use cita_cloud_proto::{
     blockchain::{Block, CompactBlock, RawTransaction, RawTransactions},
     client::NetworkClientTrait,
     common::{
-        Address, ConsensusConfiguration, Empty, Hash, Hashes, NodeNetInfo, NodeStatus, PeerStatus,
-        Proof, ProposalInner, StateRoot,
+        Address, ConsensusConfiguration, Hash, Hashes, NodeNetInfo, NodeStatus, PeerStatus, Proof,
+        ProposalInner, StateRoot,
     },
     controller::{BlockNumber, CrossChainProof},
     network::NetworkMsg,
@@ -41,14 +38,10 @@ use cloud_util::{
 use crate::{
     config::ControllerConfig,
     core::{
-        auditor::Auditor,
-        chain::{Chain, ChainStep},
-        genesis::GenesisBlock,
-        pool::Pool,
+        auditor::Auditor, chain::Chain, genesis::GenesisBlock, pool::Pool,
         system_config::SystemConfig,
     },
     crypto::{check_transactions, get_block_hash, hash_data},
-    event::EventTask,
     grpc_client::{
         consensus::reconfigure,
         executor::get_receipt_proof,
@@ -60,74 +53,23 @@ use crate::{
         },
         storage_client,
     },
-    protocol::node_manager::{
-        chain_status_respond::Respond, ChainStatus, ChainStatusInit, ChainStatusRespond,
-        NodeAddress, NodeManager,
-    },
-    protocol::sync_manager::{
-        sync_block_respond, SyncBlockRequest, SyncBlockRespond, SyncBlocks, SyncManager,
-        SyncTxRequest, SyncTxRespond,
+    inner_health_check::InnerHealthCheck,
+    protocol::{
+        controller_msg_type::ControllerMsgType,
+        node_manager::{
+            chain_status_respond::Respond, ChainStatus, ChainStatusInit, ChainStatusRespond,
+            NodeAddress, NodeManager,
+        },
+        sync_manager::{
+            sync_block_respond, SyncBlockRequest, SyncBlockRespond, SyncBlocks, SyncManager,
+            SyncTxRequest, SyncTxRespond,
+        },
     },
     util::*,
     {impl_broadcast, impl_unicast},
 };
 
-#[derive(Debug)]
-pub enum ControllerMsgType {
-    ChainStatusInitType,
-    ChainStatusInitRequestType,
-    ChainStatusType,
-    ChainStatusRespondType,
-    SyncBlockType,
-    SyncBlockRespondType,
-    SyncTxType,
-    SyncTxRespondType,
-    SendTxType,
-    SendTxsType,
-    Noop,
-}
-
-impl From<&str> for ControllerMsgType {
-    fn from(s: &str) -> Self {
-        match s {
-            "chain_status_init" => Self::ChainStatusInitType,
-            "chain_status_init_req" => Self::ChainStatusInitRequestType,
-            "chain_status" => Self::ChainStatusType,
-            "chain_status_respond" => Self::ChainStatusRespondType,
-            "sync_block" => Self::SyncBlockType,
-            "sync_block_respond" => Self::SyncBlockRespondType,
-            "sync_tx" => Self::SyncTxType,
-            "sync_tx_respond" => Self::SyncTxRespondType,
-            "send_tx" => Self::SendTxType,
-            "send_txs" => Self::SendTxsType,
-            _ => Self::Noop,
-        }
-    }
-}
-
-impl ::std::fmt::Display for ControllerMsgType {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl From<ControllerMsgType> for &str {
-    fn from(t: ControllerMsgType) -> Self {
-        match t {
-            ControllerMsgType::ChainStatusInitType => "chain_status_init",
-            ControllerMsgType::ChainStatusInitRequestType => "chain_status_init_req",
-            ControllerMsgType::ChainStatusType => "chain_status",
-            ControllerMsgType::ChainStatusRespondType => "chain_status_respond",
-            ControllerMsgType::SyncBlockType => "sync_block",
-            ControllerMsgType::SyncBlockRespondType => "sync_block_respond",
-            ControllerMsgType::SyncTxType => "sync_tx",
-            ControllerMsgType::SyncTxRespondType => "sync_tx_respond",
-            ControllerMsgType::SendTxType => "send_tx",
-            ControllerMsgType::SendTxsType => "send_txs",
-            ControllerMsgType::Noop => "noop",
-        }
-    }
-}
+use super::state_machine::{Event, State, Superstate};
 
 #[derive(Clone)]
 pub struct Controller {
@@ -151,9 +93,7 @@ pub struct Controller {
 
     pub(crate) sync_manager: SyncManager,
 
-    pub(crate) task_sender: mpsc::Sender<EventTask>,
-    // sync state flag
-    is_sync: Arc<RwLock<bool>>,
+    pub(crate) event_sender: flume::Sender<Event>,
 
     pub(crate) forward_pool: Arc<RwLock<RawTransactions>>,
 
@@ -162,6 +102,8 @@ pub struct Controller {
     pub init_block_number: u64,
 
     pub private_key_path: String,
+
+    pub inner_health_check: Arc<RwLock<InnerHealthCheck>>,
 }
 
 impl Controller {
@@ -172,7 +114,7 @@ impl Controller {
         current_block_hash: Vec<u8>,
         sys_config: SystemConfig,
         genesis: GenesisBlock,
-        task_sender: mpsc::Sender<EventTask>,
+        event_sender: flume::Sender<Event>,
         initial_sys_config: SystemConfig,
         private_key_path: String,
     ) -> Self {
@@ -228,12 +170,12 @@ impl Controller {
             },
             current_status: Arc::new(RwLock::new(own_status)),
             global_status: Arc::new(RwLock::new((NodeAddress(0), ChainStatus::default()))),
-            task_sender,
-            is_sync: Arc::new(RwLock::new(false)),
+            event_sender,
             forward_pool: Arc::new(RwLock::new(RawTransactions { body: vec![] })),
             initial_sys_config,
             init_block_number: current_block_number,
             private_key_path,
+            inner_health_check: Arc::new(RwLock::new(InnerHealthCheck::default())),
         }
     }
 
@@ -462,16 +404,15 @@ impl Controller {
                 ))
                 .await;
                 controller_for_add
-                    .task_sender
-                    .send(EventTask::BroadCastCSI)
-                    .await
+                    .event_sender
+                    .send(Event::BroadcastCSI)
                     .unwrap();
             });
         }
         res
     }
 
-    pub async fn rpc_get_node_status(&self, _: Empty) -> Result<NodeStatus, StatusCodeEnum> {
+    pub async fn rpc_get_node_status(&self, state: &State) -> Result<NodeStatus, StatusCodeEnum> {
         let peers_count = get_network_status().await?.peer_count;
         let peers_netinfo = get_peers_info().await?;
         let mut peers_status = vec![];
@@ -500,7 +441,7 @@ impl Controller {
         });
 
         let node_status = NodeStatus {
-            is_sync: self.get_sync_state().await,
+            is_sync: state.matches_super(&Superstate::Sync {}),
             version: env!("CARGO_PKG_VERSION").to_string(),
             self_status,
             peers_count,
@@ -538,8 +479,11 @@ impl Controller {
         })
     }
 
-    pub async fn chain_get_proposal(&self) -> Result<(u64, Vec<u8>), StatusCodeEnum> {
-        if self.get_sync_state().await {
+    pub async fn chain_get_proposal(
+        &self,
+        state: &State,
+    ) -> Result<(u64, Vec<u8>), StatusCodeEnum> {
+        if state.matches_super(&Superstate::Sync {}) {
             return Err(StatusCodeEnum::NodeInSyncMode);
         }
 
@@ -735,7 +679,7 @@ impl Controller {
                     let mut wr = self.chain.write().await;
                     wr.clear_candidate();
                 }
-                self.try_sync_block().await;
+                self.event_sender.send(Event::TrySyncBlock).unwrap();
             }
             _ => {}
         }
@@ -771,7 +715,7 @@ impl Controller {
                 status.address = Some(self.local_address.clone());
                 self.set_status(status.clone()).await;
                 self.broadcast_chain_status(status).await;
-                self.try_sync_block().await;
+                self.event_sender.send(Event::TrySyncBlock).unwrap();
                 Ok(config)
             }
             Err(StatusCodeEnum::ProposalTooHigh) => {
@@ -780,7 +724,7 @@ impl Controller {
                     let mut wr = self.chain.write().await;
                     wr.clear_candidate();
                 }
-                self.try_sync_block().await;
+                self.event_sender.send(Event::TrySyncBlock).unwrap();
                 Err(StatusCodeEnum::ProposalTooHigh)
             }
             Err(e) => Err(e),
@@ -865,12 +809,16 @@ impl Controller {
                             let chain_status_init = self.make_csi(own_status).await?;
                             self.unicast_chain_status_init(msg.origin, chain_status_init)
                                 .await;
-                            self.try_update_global_status(&node_orign, status).await?;
+                            self.event_sender
+                                .send(Event::TryUpdateGlobalStatus(node_orign, status))
+                                .unwrap();
                         }
                         return Err(status_code);
                     }
                 }
-                self.try_update_global_status(&node_orign, status).await?;
+                self.event_sender
+                    .send(Event::TryUpdateGlobalStatus(node_orign, status))
+                    .unwrap();
             }
             ControllerMsgType::ChainStatusInitRequestType => {
                 let chain_status_init = self.make_csi(self.get_status().await).await?;
@@ -920,8 +868,10 @@ impl Controller {
                         self.node_manager
                             .set_node(&node_orign, chain_status.clone())
                             .await?;
-                        self.try_update_global_status(&node_orign, chain_status)
-                            .await?;
+
+                        self.event_sender
+                            .send(Event::TryUpdateGlobalStatus(node_orign, chain_status))
+                            .unwrap();
                     }
                     // give Ok or Err for process_network_msg is same
                     Err(StatusCodeEnum::AddressOriginCheckError) | Ok(false) => {
@@ -965,9 +915,8 @@ impl Controller {
                     "get SyncBlockRequest: from origin: {:x}, height: {} - {}",
                     msg.origin, sync_block_request.start_height, sync_block_request.end_height
                 );
-                self.task_sender
-                    .send(EventTask::SyncBlockReq(sync_block_request, msg.origin))
-                    .await
+                self.event_sender
+                    .send(Event::SyncBlockReq(sync_block_request, msg.origin))
                     .unwrap();
             }
 
@@ -1010,9 +959,8 @@ impl Controller {
                                         .await
                                     {
                                         controller_clone
-                                            .task_sender
-                                            .send(EventTask::SyncBlock)
-                                            .await
+                                            .event_sender
+                                            .send(Event::SyncBlock)
                                             .unwrap();
                                     }
                                 }
@@ -1186,10 +1134,11 @@ impl Controller {
         }
     }
 
-    async fn try_update_global_status(
+    pub async fn try_update_global_status(
         &self,
         node: &NodeAddress,
         status: ChainStatus,
+        in_sync: bool,
     ) -> Result<bool, StatusCodeEnum> {
         let old_status = self.get_global_status().await;
         let own_status = self.get_status().await;
@@ -1203,15 +1152,15 @@ impl Controller {
             );
             self.update_global_status(node.to_owned(), status).await;
             if global_height > own_status.height {
-                self.try_sync_block().await;
+                self.event_sender.send(Event::TrySyncBlock).unwrap();
             }
-            if (!self.get_sync_state().await || global_height % self.config.force_sync_epoch == 0)
+            if (!in_sync || global_height % self.config.force_sync_epoch == 0)
                 && self
                     .sync_manager
                     .contains_block(own_status.height + 1)
                     .await
             {
-                self.task_sender.send(EventTask::SyncBlock).await.unwrap();
+                self.event_sender.send(Event::SyncBlock).unwrap();
             }
 
             return Ok(true);
@@ -1219,7 +1168,7 @@ impl Controller {
 
         // request block if own height behind remote's
         if global_height > own_status.height {
-            self.try_sync_block().await;
+            self.event_sender.send(Event::TrySyncBlock).unwrap();
         }
 
         Ok(false)
@@ -1273,99 +1222,6 @@ impl Controller {
             .await)
     }
 
-    pub async fn try_sync_block(&self) {
-        let (_, global_status) = self.get_global_status().await;
-        // sync mode will return exclude global_height % self.config.force_sync_epoch == 0
-        if self.get_sync_state().await && global_status.height % self.config.force_sync_epoch != 0 {
-            return;
-        }
-
-        let mut current_height = self.get_status().await.height;
-        let controller_clone = self.clone();
-        tokio::spawn(async move {
-            for _ in 0..controller_clone.config.sync_req {
-                let (global_address, global_status) = controller_clone.get_global_status().await;
-
-                // try read chain state, if can't get chain default online state
-                let res = {
-                    if let Ok(chain) = controller_clone.chain.try_read() {
-                        chain.next_step(&global_status).await
-                    } else {
-                        ChainStep::BusyState
-                    }
-                };
-
-                match res {
-                    ChainStep::SyncStep => {
-                        if let Some(sync_req) = controller_clone
-                            .sync_manager
-                            .get_sync_block_req(current_height, &global_status)
-                            .await
-                        {
-                            controller_clone.set_sync_state(true).await;
-                            current_height = sync_req.end_height;
-                            controller_clone
-                                .unicast_sync_block(global_address.0, sync_req.clone())
-                                .await
-                                .await
-                                .unwrap();
-                            if sync_req.start_height == sync_req.end_height {
-                                return;
-                            }
-                        } else {
-                            return;
-                        }
-                    }
-                    ChainStep::OnlineStep => {
-                        controller_clone.set_sync_state(false).await;
-                        return;
-                    }
-                    ChainStep::BusyState => return,
-                }
-            }
-        });
-    }
-
-    pub async fn sync_block(&self) -> Result<(), StatusCodeEnum> {
-        let mut current_height = self.get_status().await.height;
-        for _ in 0..self.config.sync_req {
-            let (global_address, global_status) = self.get_global_status().await;
-
-            let res = {
-                let chain = self.chain.read().await;
-                chain.next_step(&global_status).await
-            };
-
-            match res {
-                ChainStep::SyncStep => {
-                    if let Some(sync_req) = self
-                        .sync_manager
-                        .get_sync_block_req(current_height, &global_status)
-                        .await
-                    {
-                        self.set_sync_state(true).await;
-                        current_height = sync_req.end_height;
-                        self.unicast_sync_block(global_address.0, sync_req.clone())
-                            .await
-                            .await
-                            .unwrap();
-                        if sync_req.start_height == sync_req.end_height {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                ChainStep::OnlineStep => {
-                    self.set_sync_state(false).await;
-                    break;
-                }
-                ChainStep::BusyState => unreachable!(),
-            }
-        }
-        Ok(())
-    }
-
     pub async fn make_csi(
         &self,
         own_status: ChainStatus,
@@ -1390,219 +1246,214 @@ impl Controller {
         })
     }
 
-    pub async fn get_sync_state(&self) -> bool {
-        *self.is_sync.read().await
-    }
-
-    pub async fn set_sync_state(&self, state: bool) {
-        if self.get_sync_state().await == state {
-            return;
-        }
-        *self.is_sync.write().await = state;
-        if !state {
-            self.sync_manager.clear().await;
-        }
-    }
-
-    pub async fn handle_event(
-        &self,
-        event_task: EventTask,
-        old_status: &mut HashMap<NodeAddress, ChainStatus>,
-    ) {
-        match event_task {
-            EventTask::SyncBlockReq(req, origin) => {
-                let mut block_vec = Vec::new();
-
-                for h in req.start_height..=req.end_height {
-                    if let Ok(block) = get_full_block(h).await {
-                        block_vec.push(block);
-                    } else {
-                        warn!("handle SyncBlockReq failed: get block({}) failed", h);
-                        break;
+    pub async fn handle_record_all_node(&self) {
+        let nodes = self.node_manager.nodes.read().await.clone();
+        for (na, current_cs) in nodes.iter() {
+            if let Some(old_cs) = self.node_manager.nodes_pre_status.read().await.get(na) {
+                match old_cs.height.cmp(&current_cs.height) {
+                    Ordering::Greater => {
+                        error!(
+                            "node status rollbacked: old height: {}, current height: {}. set it misbehavior. origin: {}",
+                            old_cs.height,
+                            current_cs.height,
+                            &na
+                        );
+                        let _ = self.node_manager.set_misbehavior_node(na).await;
+                    }
+                    Ordering::Equal => {
+                        warn!(
+                            "node status stale: height: {}. delete it. origin: {}",
+                            old_cs.height, &na
+                        );
+                        if self.node_manager.in_node(na).await {
+                            self.node_manager.delete_node(na).await;
+                        }
+                    }
+                    Ordering::Less => {
+                        // update node in old status
+                        self.node_manager
+                            .nodes_pre_status
+                            .write()
+                            .await
+                            .insert(*na, current_cs.clone());
                     }
                 }
-
-                if block_vec.len() as u64 != req.end_height - req.start_height + 1 {
-                    let sync_block_respond = SyncBlockRespond {
-                        respond: Some(sync_block_respond::Respond::MissBlock(
-                            self.local_address.clone(),
-                        )),
-                    };
-                    self.unicast_sync_block_respond(origin, sync_block_respond)
-                        .await;
-                } else {
-                    info!(
-                        "send SyncBlockRespond: to origin: {:x}, height: {} - {}",
-                        origin, req.start_height, req.end_height
-                    );
-                    let sync_block = SyncBlocks {
-                        address: Some(self.local_address.clone()),
-                        sync_blocks: block_vec,
-                    };
-                    let sync_block_respond = SyncBlockRespond {
-                        respond: Some(sync_block_respond::Respond::Ok(sync_block)),
-                    };
-                    self.unicast_sync_block_respond(origin, sync_block_respond)
-                        .await;
-                }
+            } else {
+                self.node_manager
+                    .nodes_pre_status
+                    .write()
+                    .await
+                    .insert(*na, current_cs.clone());
             }
-            EventTask::SyncBlock => {
-                debug!("receive SyncBlock event");
-                let (global_address, global_status) = self.get_global_status().await;
-                let mut own_status = self.get_status().await;
-                // get chain lock means syncing
-                self.set_sync_state(true).await;
-                {
-                    match {
-                        let chain = self.chain.read().await;
-                        chain.next_step(&global_status).await
-                    } {
-                        ChainStep::SyncStep => {
-                            let mut syncing = false;
-                            {
-                                let mut chain = self.chain.write().await;
-                                while let Some((addr, block)) =
-                                    self.sync_manager.remove_block(own_status.height + 1).await
-                                {
-                                    chain.clear_candidate();
-                                    match chain.process_block(block).await {
-                                        Ok((consensus_config, mut status)) => {
-                                            reconfigure(consensus_config)
-                                                .await
-                                                .is_success()
-                                                .unwrap();
-                                            status.address = Some(self.local_address.clone());
-                                            self.set_status(status.clone()).await;
-                                            own_status = status.clone();
-                                            if status.height
-                                                % self.config.send_chain_status_interval_sync
-                                                == 0
-                                            {
-                                                self.broadcast_chain_status(status).await;
-                                            }
-                                            syncing = true;
-                                        }
-                                        Err(e) => {
-                                            if (e as u64) % 100 == 0 {
-                                                warn!("sync block failed: {}", e.to_string());
-                                                continue;
-                                            }
-                                            warn!("sync block failed: {}. set remote misbehavior. origin: {}", NodeAddress::from(&addr), e.to_string());
-                                            let del_node_addr = NodeAddress::from(&addr);
-                                            let _ = self
-                                                .node_manager
-                                                .set_misbehavior_node(&del_node_addr)
-                                                .await;
-                                            if global_address == del_node_addr {
-                                                let (ex_addr, ex_status) =
-                                                    self.node_manager.pick_node().await;
-                                                self.update_global_status(ex_addr, ex_status).await;
-                                            }
-                                            if let Some(range_heights) = self
-                                                .sync_manager
-                                                .clear_node_block(&addr, &own_status)
-                                                .await
-                                            {
-                                                let (global_address, global_status) =
-                                                    self.get_global_status().await;
-                                                if global_address.0 != 0 {
-                                                    for range_height in range_heights {
-                                                        if let Some(reqs) =
-                                                            self.sync_manager.re_sync_block_req(
-                                                                range_height,
-                                                                &global_status,
-                                                            )
-                                                        {
-                                                            for req in reqs {
-                                                                self.unicast_sync_block(
-                                                                    global_address.0,
-                                                                    req,
-                                                                )
-                                                                .await;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                syncing = true;
-                                            }
+        }
+    }
+
+    pub async fn handle_broadcast_csi(&self) {
+        info!("receive BroadCastCSI event");
+        let status = self.get_status().await;
+
+        let mut chain_status_bytes = Vec::new();
+        status
+            .encode(&mut chain_status_bytes)
+            .map_err(|_| {
+                warn!("process BroadCastCSI failed: encode ChainStatus failed");
+                StatusCodeEnum::EncodeError
+            })
+            .unwrap();
+        let msg_hash = hash_data(&chain_status_bytes);
+
+        #[cfg(feature = "sm")]
+        let crypto = crypto_sm::crypto::Crypto::new(&self.private_key_path);
+        #[cfg(feature = "eth")]
+        let crypto = crypto_eth::crypto::Crypto::new(&self.private_key_path);
+
+        let signature = crypto.sign_message(&msg_hash).unwrap();
+
+        self.broadcast_chain_status_init(ChainStatusInit {
+            chain_status: Some(status),
+            signature,
+        })
+        .await
+        .await
+        .unwrap();
+    }
+
+    pub async fn syncing_block(&self) {
+        let (global_address, _) = self.get_global_status().await;
+        let mut own_status = self.get_status().await;
+        let mut syncing = false;
+        {
+            let mut chain = self.chain.write().await;
+            while let Some((addr, block)) =
+                self.sync_manager.remove_block(own_status.height + 1).await
+            {
+                chain.clear_candidate();
+                match chain.process_block(block).await {
+                    Ok((consensus_config, mut status)) => {
+                        reconfigure(consensus_config).await.is_success().unwrap();
+                        status.address = Some(self.local_address.clone());
+                        self.set_status(status.clone()).await;
+                        own_status = status.clone();
+                        if status.height % self.config.send_chain_status_interval_sync == 0 {
+                            self.broadcast_chain_status(status).await;
+                        }
+                        syncing = true;
+                    }
+                    Err(e) => {
+                        if (e as u64) % 100 == 0 {
+                            warn!("sync block failed: {}", e.to_string());
+                            continue;
+                        }
+                        warn!(
+                            "sync block failed: {}. set remote misbehavior. origin: {}",
+                            NodeAddress::from(&addr),
+                            e.to_string()
+                        );
+                        let del_node_addr = NodeAddress::from(&addr);
+                        let _ = self.node_manager.set_misbehavior_node(&del_node_addr).await;
+                        if global_address == del_node_addr {
+                            let (ex_addr, ex_status) = self.node_manager.pick_node().await;
+                            self.update_global_status(ex_addr, ex_status).await;
+                        }
+                        if let Some(range_heights) =
+                            self.sync_manager.clear_node_block(&addr, &own_status).await
+                        {
+                            let (global_address, global_status) = self.get_global_status().await;
+                            if global_address.0 != 0 {
+                                for range_height in range_heights {
+                                    if let Some(reqs) = self
+                                        .sync_manager
+                                        .re_sync_block_req(range_height, &global_status)
+                                    {
+                                        for req in reqs {
+                                            self.unicast_sync_block(global_address.0, req).await;
                                         }
                                     }
                                 }
                             }
-                            if syncing {
-                                self.sync_block().await.unwrap();
-                            }
+                        } else {
+                            syncing = true;
                         }
-                        ChainStep::OnlineStep => {
-                            self.set_sync_state(false).await;
-                        }
-                        ChainStep::BusyState => unreachable!(),
                     }
                 }
             }
-            EventTask::BroadCastCSI => {
-                info!("receive BroadCastCSI event");
-                let status = self.get_status().await;
+        }
+        if syncing {
+            self.event_sender.send(Event::TrySyncBlock).unwrap();
+        }
+    }
 
-                let mut chain_status_bytes = Vec::new();
-                status
-                    .encode(&mut chain_status_bytes)
-                    .map_err(|_| {
-                        warn!("process BroadCastCSI failed: encode ChainStatus failed");
-                        StatusCodeEnum::EncodeError
-                    })
-                    .unwrap();
-                let msg_hash = hash_data(&chain_status_bytes);
+    pub async fn handle_sync_block_req(&self, req: &SyncBlockRequest, origin: &u64) {
+        let mut block_vec = Vec::new();
 
-                #[cfg(feature = "sm")]
-                let crypto = crypto_sm::crypto::Crypto::new(&self.private_key_path);
-                #[cfg(feature = "eth")]
-                let crypto = crypto_eth::crypto::Crypto::new(&self.private_key_path);
-
-                let signature = crypto.sign_message(&msg_hash).unwrap();
-
-                self.broadcast_chain_status_init(ChainStatusInit {
-                    chain_status: Some(status),
-                    signature,
-                })
-                .await
-                .await
-                .unwrap();
+        for h in req.start_height..=req.end_height {
+            if let Ok(block) = get_full_block(h).await {
+                block_vec.push(block);
+            } else {
+                warn!("handle SyncBlockReq failed: get block({}) failed", h);
+                break;
             }
-            EventTask::RecordAllNode => {
-                let nodes = self.node_manager.nodes.read().await.clone();
-                for (na, current_cs) in nodes.iter() {
-                    if let Some(old_cs) = old_status.get(na) {
-                        match old_cs.height.cmp(&current_cs.height) {
-                            Ordering::Greater => {
-                                error!(
-                                    "node status rollbacked: old height: {}, current height: {}. set it misbehavior. origin: {}",
-                                    old_cs.height,
-                                    current_cs.height,
-                                    &na
-                                );
-                                let _ = self.node_manager.set_misbehavior_node(na).await;
-                            }
-                            Ordering::Equal => {
-                                warn!(
-                                    "node status stale: height: {}. delete it. origin: {}",
-                                    old_cs.height, &na
-                                );
-                                if self.node_manager.in_node(na).await {
-                                    self.node_manager.delete_node(na).await;
-                                }
-                            }
-                            Ordering::Less => {
-                                // update node in old status
-                                old_status.insert(*na, current_cs.clone());
-                            }
-                        }
-                    } else {
-                        old_status.insert(*na, current_cs.clone());
-                    }
-                }
+        }
+
+        if block_vec.len() as u64 != req.end_height - req.start_height + 1 {
+            let sync_block_respond = SyncBlockRespond {
+                respond: Some(sync_block_respond::Respond::MissBlock(
+                    self.local_address.clone(),
+                )),
+            };
+            self.unicast_sync_block_respond(*origin, sync_block_respond)
+                .await;
+        } else {
+            info!(
+                "send SyncBlockRespond: to origin: {:x}, height: {} - {}",
+                origin, req.start_height, req.end_height
+            );
+            let sync_block = SyncBlocks {
+                address: Some(self.local_address.clone()),
+                sync_blocks: block_vec,
+            };
+            let sync_block_respond = SyncBlockRespond {
+                respond: Some(sync_block_respond::Respond::Ok(sync_block)),
+            };
+            self.unicast_sync_block_respond(*origin, sync_block_respond)
+                .await;
+        }
+    }
+
+    pub async fn inner_health_check(&self) {
+        let mut inner_health_check = self.inner_health_check.write().await;
+        inner_health_check.tick += 1;
+        if inner_health_check.current_height == u64::MAX {
+            inner_health_check.current_height = self.get_status().await.height;
+            inner_health_check.tick = 0;
+        } else if self.get_status().await.height == inner_health_check.current_height
+            && inner_health_check.tick >= inner_health_check.retry_limit
+        {
+            info!(
+                "inner healthy check: broadcast csi: height: {}, {}th time",
+                inner_health_check.current_height, inner_health_check.tick
+            );
+            if self.get_global_status().await.1.height > inner_health_check.current_height {
+                self.chain.write().await.clear_candidate();
             }
+            self.event_sender.send(Event::BroadcastCSI).unwrap();
+            inner_health_check.retry_limit += inner_health_check.tick;
+            inner_health_check.tick = 0;
+        } else if self.get_status().await.height < inner_health_check.current_height {
+            unreachable!()
+        } else if self.get_status().await.height > inner_health_check.current_height {
+            // update current height
+            inner_health_check.current_height = self.get_status().await.height;
+            inner_health_check.tick = 0;
+            inner_health_check.retry_limit = 0;
+        }
+    }
+
+    pub async fn retransmission_tx(&self) {
+        let mut f_pool = self.forward_pool.write().await;
+        if !f_pool.body.is_empty() {
+            self.broadcast_send_txs(f_pool.clone()).await;
+            f_pool.body.clear();
         }
     }
 }

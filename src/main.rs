@@ -18,47 +18,36 @@ mod protocol;
 mod util;
 mod core;
 mod crypto;
-mod event;
 mod grpc_client;
 mod grpc_server;
-mod health_check;
+mod inner_health_check;
 
 #[macro_use]
 extern crate tracing as logger;
 
 use clap::Parser;
-use std::{collections::HashMap, net::AddrParseError, time::Duration};
-use tokio::{sync::mpsc, time};
-use tonic::transport::Server;
-use tonic_web::GrpcWebLayer;
+use flume::unbounded;
+use statig::awaitable::IntoStateMachineExt;
+use std::{sync::Arc, time::Duration};
+use tokio::{sync::RwLock, time};
 
-use cita_cloud_proto::{
-    controller::consensus2_controller_service_server::Consensus2ControllerServiceServer,
-    controller::rpc_service_server::RpcServiceServer, health_check::health_server::HealthServer,
-    network::network_msg_handler_service_server::NetworkMsgHandlerServiceServer,
-    network::RegisterInfo, status_code::StatusCodeEnum, storage::Regions,
-    CONTROLLER_DESCRIPTOR_SET,
-};
+use cita_cloud_proto::{network::RegisterInfo, status_code::StatusCodeEnum, storage::Regions};
 use cloud_util::{
-    metrics::{run_metrics_exporter, MiddlewareLayer},
-    network::register_network_msg_handler,
-    panic_hook::set_panic_handler,
-    storage::load_data,
+    network::register_network_msg_handler, panic_hook::set_panic_handler, storage::load_data,
 };
 
 use crate::{
     config::ControllerConfig,
-    core::{controller::Controller, genesis::GenesisBlock, system_config::SystemConfig},
-    event::EventTask,
+    core::{
+        controller::Controller,
+        genesis::GenesisBlock,
+        state_machine::{ControllerStateMachine, Event},
+        system_config::SystemConfig,
+    },
     grpc_client::{
         init_grpc_client, network_client, storage::load_data_maybe_empty, storage_client,
     },
-    grpc_server::{
-        consensus_server::Consensus2ControllerServer, network_server::NetworkMsgHandlerServer,
-        rpc_server::RPCServer,
-    },
-    health_check::HealthCheckServer,
-    protocol::node_manager::{ChainStatus, NodeAddress},
+    grpc_server::grpc_serve,
     util::{clap_about, u64_decode},
 };
 
@@ -198,16 +187,15 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
     let initial_sys_config = sys_config.clone();
     sys_config.init(&config).await?;
 
-    // todo config
-    let (task_sender, mut task_receiver) = mpsc::channel(64);
+    let (event_sender, event_receiver) = unbounded();
 
-    let controller = Controller::new(
+    let mut controller = Controller::new(
         config.clone(),
         current_block_number,
         current_block_hash,
         sys_config.clone(),
         genesis,
-        task_sender,
+        event_sender.clone(),
         initial_sys_config,
         opts.private_key_path.clone(),
     )
@@ -216,207 +204,50 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
     config.clone().set_global();
     controller.init(current_block_number, sys_config).await;
 
-    let controller_for_reconnect = controller.clone();
-    tokio::spawn(async move {
-        let mut long_interval = time::interval(Duration::from_secs(
-            controller_for_reconnect
-                .config
-                .origin_node_reconnect_interval,
-        ));
-        loop {
-            long_interval.tick().await;
-            {
-                controller_for_reconnect
-                    .task_sender
-                    .send(EventTask::BroadCastCSI)
-                    .await
+    let controller_state_machine = Arc::new(RwLock::new(
+        ControllerStateMachine
+            .uninitialized_state_machine()
+            .init_with_context(&mut controller)
+            .await,
+    ));
+
+    tokio::spawn(grpc_serve(
+        controller.clone(),
+        controller_state_machine.clone(),
+        config.clone(),
+    ));
+
+    let mut reconnect_interval =
+        time::interval(Duration::from_secs(config.origin_node_reconnect_interval));
+
+    let mut inner_health_check_interval = time::interval(Duration::from_secs(
+        config.inner_block_growth_check_interval,
+    ));
+    let mut forward_interval = time::interval(Duration::from_micros(config.buffer_duration));
+
+    loop {
+        tokio::select! {
+            _ = reconnect_interval.tick() => {
+                event_sender
+                    .send(Event::BroadcastCSI)
                     .unwrap();
-                controller_for_reconnect
-                    .task_sender
-                    .send(EventTask::RecordAllNode)
-                    .await
+                event_sender
+                    .send(Event::RecordAllNode)
                     .unwrap();
+            },
+            _ = inner_health_check_interval.tick() => {
+                event_sender
+                    .send(Event::InnerHealthCheck)
+                    .unwrap();
+            },
+            _ = forward_interval.tick() => {
+                controller
+                    .retransmission_tx()
+                    .await;
+            },
+            Ok(event) = event_receiver.recv_async() => {
+                controller_state_machine.write().await.handle_with_context(&event, &mut controller).await;
             }
         }
-    });
-
-    let controller_for_healthy = controller.clone();
-    tokio::spawn(async move {
-        let mut current_height = u64::MAX;
-        // only above retry_limit allow broadcast retry, retry timing is 1, 1, 2, 4, 8...2^n
-        let mut retry_limit: u64 = 0;
-        // tick count interval times
-        let mut tick: u64 = 0;
-        let mut short_interval = time::interval(Duration::from_secs(
-            controller_for_healthy
-                .config
-                .inner_block_growth_check_interval,
-        ));
-        loop {
-            short_interval.tick().await;
-            {
-                tick += 1;
-                let height = controller_for_healthy.get_status().await.height;
-                if current_height == u64::MAX {
-                    current_height = height;
-                    tick = 0;
-                } else if height == current_height && tick >= retry_limit {
-                    info!(
-                        "inner healthy check: broadcast csi: height: {}, {}th time",
-                        current_height, tick
-                    );
-                    if controller_for_healthy.get_global_status().await.1.height > current_height {
-                        let mut chain = controller_for_healthy.chain.write().await;
-                        chain.clear_candidate();
-                    }
-                    controller_for_healthy
-                        .task_sender
-                        .send(EventTask::BroadCastCSI)
-                        .await
-                        .unwrap();
-                    controller_for_healthy.set_sync_state(false).await;
-                    retry_limit += tick;
-                    tick = 0;
-                } else if height < current_height {
-                    unreachable!()
-                } else if height > current_height {
-                    // update current height
-                    current_height = height;
-                    tick = 0;
-                    retry_limit = 0;
-                }
-            }
-        }
-    });
-
-    let controller_for_retransmission = controller.clone();
-    tokio::spawn(async move {
-        let mut forward_interval = time::interval(Duration::from_micros(
-            controller_for_retransmission.config.buffer_duration,
-        ));
-        loop {
-            forward_interval.tick().await;
-            {
-                let mut f_pool = controller_for_retransmission.forward_pool.write().await;
-                if !f_pool.body.is_empty() {
-                    controller_for_retransmission
-                        .broadcast_send_txs(f_pool.clone())
-                        .await;
-                    f_pool.body.clear();
-                }
-            }
-        }
-    });
-
-    let controller_for_task = controller.clone();
-    tokio::spawn(async move {
-        let mut old_status: HashMap<NodeAddress, ChainStatus> = HashMap::new();
-        while let Some(event_task) = task_receiver.recv().await {
-            controller_for_task
-                .handle_event(event_task, &mut old_status)
-                .await;
-        }
-    });
-
-    let addr_str = format!("0.0.0.0:{grpc_port}");
-    let addr = addr_str.parse().map_err(|e: AddrParseError| {
-        warn!("parse grpc listen address failed: {:?} ", e);
-        StatusCodeEnum::FatalError
-    })?;
-
-    let layer = if config.enable_metrics {
-        tokio::spawn(async move {
-            run_metrics_exporter(config.metrics_port).await.unwrap();
-        });
-
-        Some(
-            tower::ServiceBuilder::new()
-                .layer(MiddlewareLayer::new(config.metrics_buckets))
-                .into_inner(),
-        )
-    } else {
-        None
-    };
-
-    let reflection = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(CONTROLLER_DESCRIPTOR_SET)
-        .build()
-        .unwrap();
-
-    info!("start controller grpc server");
-    let http2_keepalive_interval = config.http2_keepalive_interval;
-    let http2_keepalive_timeout = config.http2_keepalive_timeout;
-    let tcp_keepalive = config.tcp_keepalive;
-    if let Some(layer) = layer {
-        Server::builder()
-            .accept_http1(true)
-            .http2_keepalive_interval(Some(Duration::from_secs(http2_keepalive_interval)))
-            .http2_keepalive_timeout(Some(Duration::from_secs(http2_keepalive_timeout)))
-            .tcp_keepalive(Some(Duration::from_secs(tcp_keepalive)))
-            .layer(layer)
-            .layer(GrpcWebLayer::new())
-            .add_service(reflection)
-            .add_service(
-                RpcServiceServer::new(RPCServer::new(controller.clone()))
-                    .max_decoding_message_size(usize::MAX),
-            )
-            .add_service(
-                Consensus2ControllerServiceServer::new(Consensus2ControllerServer::new(
-                    controller.clone(),
-                ))
-                .max_decoding_message_size(usize::MAX),
-            )
-            .add_service(
-                NetworkMsgHandlerServiceServer::new(NetworkMsgHandlerServer::new(
-                    controller.clone(),
-                ))
-                .max_decoding_message_size(usize::MAX),
-            )
-            .add_service(HealthServer::new(HealthCheckServer::new(
-                controller,
-                config.health_check_timeout,
-            )))
-            .serve(addr)
-            .await
-            .map_err(|e| {
-                warn!("start controller grpc server failed: {:?} ", e);
-                StatusCodeEnum::FatalError
-            })?;
-    } else {
-        Server::builder()
-            .accept_http1(true)
-            .http2_keepalive_interval(Some(Duration::from_secs(http2_keepalive_interval)))
-            .http2_keepalive_timeout(Some(Duration::from_secs(http2_keepalive_timeout)))
-            .tcp_keepalive(Some(Duration::from_secs(tcp_keepalive)))
-            .layer(GrpcWebLayer::new())
-            .add_service(reflection)
-            .add_service(
-                RpcServiceServer::new(RPCServer::new(controller.clone()))
-                    .max_decoding_message_size(usize::MAX),
-            )
-            .add_service(
-                Consensus2ControllerServiceServer::new(Consensus2ControllerServer::new(
-                    controller.clone(),
-                ))
-                .max_decoding_message_size(usize::MAX),
-            )
-            .add_service(
-                NetworkMsgHandlerServiceServer::new(NetworkMsgHandlerServer::new(
-                    controller.clone(),
-                ))
-                .max_decoding_message_size(usize::MAX),
-            )
-            .add_service(HealthServer::new(HealthCheckServer::new(
-                controller,
-                config.health_check_timeout,
-            )))
-            .serve(addr)
-            .await
-            .map_err(|e| {
-                warn!("start controller grpc server failed: {:?} ", e);
-                StatusCodeEnum::FatalError
-            })?;
     }
-
-    Ok(())
 }

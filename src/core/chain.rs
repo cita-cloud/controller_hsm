@@ -29,10 +29,10 @@ use cloud_util::{common::extract_compact, unix_now};
 
 use crate::{
     core::{
+        auditor::Auditor,
         genesis::GenesisBlock,
         pool::Pool,
         system_config::{SystemConfig, LOCK_ID_BLOCK_LIMIT, LOCK_ID_QUOTA_LIMIT},
-        auditor::Auditor,
     },
     crypto::{check_transactions, get_block_hash, hash_data},
     grpc_client::{

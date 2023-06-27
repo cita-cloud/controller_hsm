@@ -13,5 +13,153 @@
 // limitations under the License.
 
 pub(crate) mod consensus_server;
+pub(crate) mod health_check_server;
 pub(crate) mod network_server;
 pub(crate) mod rpc_server;
+
+use statig::awaitable::InitializedStateMachine;
+use std::{net::AddrParseError, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
+use tonic::transport::Server;
+use tonic_web::GrpcWebLayer;
+
+use cita_cloud_proto::{
+    controller::{
+        consensus2_controller_service_server::Consensus2ControllerServiceServer,
+        rpc_service_server::RpcServiceServer,
+    },
+    health_check::health_server::HealthServer,
+    network::network_msg_handler_service_server::NetworkMsgHandlerServiceServer,
+    status_code::StatusCodeEnum,
+    CONTROLLER_DESCRIPTOR_SET,
+};
+use cloud_util::metrics::{run_metrics_exporter, MiddlewareLayer};
+
+use crate::{
+    config::ControllerConfig,
+    core::{controller::Controller, state_machine::ControllerStateMachine},
+    grpc_server::{
+        consensus_server::Consensus2ControllerServer, health_check_server::HealthCheckServer,
+        network_server::NetworkMsgHandlerServer, rpc_server::RPCServer,
+    },
+};
+
+pub(crate) async fn grpc_serve(
+    controller: Controller,
+    controller_state_machine: Arc<RwLock<InitializedStateMachine<ControllerStateMachine>>>,
+    config: ControllerConfig,
+) {
+    let grpc_port = config.controller_port.to_string();
+    let addr_str = format!("0.0.0.0:{grpc_port}");
+    let addr = addr_str
+        .parse()
+        .map_err(|e: AddrParseError| {
+            warn!("parse grpc listen address failed: {:?} ", e);
+            StatusCodeEnum::FatalError
+        })
+        .unwrap();
+
+    let layer = if config.enable_metrics {
+        tokio::spawn(async move {
+            run_metrics_exporter(config.metrics_port).await.unwrap();
+        });
+
+        Some(
+            tower::ServiceBuilder::new()
+                .layer(MiddlewareLayer::new(config.metrics_buckets))
+                .into_inner(),
+        )
+    } else {
+        None
+    };
+
+    let reflection = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(CONTROLLER_DESCRIPTOR_SET)
+        .build()
+        .unwrap();
+
+    info!("start controller grpc server");
+    let http2_keepalive_interval = config.http2_keepalive_interval;
+    let http2_keepalive_timeout = config.http2_keepalive_timeout;
+    let tcp_keepalive = config.tcp_keepalive;
+    if let Some(layer) = layer {
+        Server::builder()
+            .accept_http1(true)
+            .http2_keepalive_interval(Some(Duration::from_secs(http2_keepalive_interval)))
+            .http2_keepalive_timeout(Some(Duration::from_secs(http2_keepalive_timeout)))
+            .tcp_keepalive(Some(Duration::from_secs(tcp_keepalive)))
+            .layer(layer)
+            .layer(GrpcWebLayer::new())
+            .add_service(reflection)
+            .add_service(
+                RpcServiceServer::new(RPCServer::new(
+                    controller.clone(),
+                    controller_state_machine.clone(),
+                ))
+                .max_decoding_message_size(usize::MAX),
+            )
+            .add_service(
+                Consensus2ControllerServiceServer::new(Consensus2ControllerServer::new(
+                    controller.clone(),
+                    controller_state_machine,
+                ))
+                .max_decoding_message_size(usize::MAX),
+            )
+            .add_service(
+                NetworkMsgHandlerServiceServer::new(NetworkMsgHandlerServer::new(
+                    controller.clone(),
+                ))
+                .max_decoding_message_size(usize::MAX),
+            )
+            .add_service(HealthServer::new(HealthCheckServer::new(
+                controller,
+                config.health_check_timeout,
+            )))
+            .serve(addr)
+            .await
+            .map_err(|e| {
+                warn!("start controller grpc server failed: {:?} ", e);
+                StatusCodeEnum::FatalError
+            })
+            .unwrap();
+    } else {
+        Server::builder()
+            .accept_http1(true)
+            .http2_keepalive_interval(Some(Duration::from_secs(http2_keepalive_interval)))
+            .http2_keepalive_timeout(Some(Duration::from_secs(http2_keepalive_timeout)))
+            .tcp_keepalive(Some(Duration::from_secs(tcp_keepalive)))
+            .layer(GrpcWebLayer::new())
+            .add_service(reflection)
+            .add_service(
+                RpcServiceServer::new(RPCServer::new(
+                    controller.clone(),
+                    controller_state_machine.clone(),
+                ))
+                .max_decoding_message_size(usize::MAX),
+            )
+            .add_service(
+                Consensus2ControllerServiceServer::new(Consensus2ControllerServer::new(
+                    controller.clone(),
+                    controller_state_machine,
+                ))
+                .max_decoding_message_size(usize::MAX),
+            )
+            .add_service(
+                NetworkMsgHandlerServiceServer::new(NetworkMsgHandlerServer::new(
+                    controller.clone(),
+                ))
+                .max_decoding_message_size(usize::MAX),
+            )
+            .add_service(HealthServer::new(HealthCheckServer::new(
+                controller,
+                config.health_check_timeout,
+            )))
+            .serve(addr)
+            .await
+            .map_err(|e| {
+                warn!("start controller grpc server failed: {:?} ", e);
+                StatusCodeEnum::FatalError
+            })
+            .unwrap();
+    }
+}

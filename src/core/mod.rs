@@ -12,16 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::protocol::sync_manager::SyncBlockRequest;
-
-#[derive(Debug)]
-pub enum EventTask {
-    // chain status respond
-    SyncBlockReq(SyncBlockRequest, u64),
-    // multicast sync block request
-    SyncBlock,
-    // broadcast chain status init
-    BroadCastCSI,
-    // record all node chain status
-    RecordAllNode,
-}
+pub(crate) mod auditor;
+pub(crate) mod chain;
+pub(crate) mod controller;
+pub(crate) mod genesis;
+pub(crate) mod pool;
+pub(crate) mod state_machine;
+pub(crate) mod system_config;
