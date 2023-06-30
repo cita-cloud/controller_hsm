@@ -64,8 +64,6 @@ pub struct ControllerConfig {
     pub enable_forward: bool,
     /// sync block height interval
     pub sync_interval: u64,
-    /// sync block request times
-    pub sync_req: u64,
     /// the height epoch to force send sync
     pub force_sync_epoch: u64,
     /// multi-send chain status interval, counted by block number
@@ -116,7 +114,6 @@ impl Default for ControllerConfig {
             origin_node_reconnect_interval: 86400,
             enable_forward: true,
             sync_interval: 10,
-            sync_req: 5,
             force_sync_epoch: 100,
             send_chain_status_interval_sync: 1000,
             health_check_timeout: 300,

@@ -93,14 +93,12 @@ pub mod sync_tx_respond {
 #[derive(Copy, Clone)]
 pub struct SyncConfig {
     sync_interval: u64,
-    sync_req: u64,
 }
 
 impl SyncConfig {
     fn new(config: &ControllerConfig) -> Self {
         Self {
             sync_interval: config.sync_interval,
-            sync_req: config.sync_req,
         }
     }
 }
@@ -258,7 +256,7 @@ impl SyncManager {
     ) -> Option<Vec<SyncBlockRequest>> {
         let mut req_vec = Vec::new();
 
-        let mut height_range = {
+        let height_range = {
             if global_status.height >= height_range.1 && global_status.height >= height_range.0 {
                 height_range
             } else if global_status.height < height_range.1 {
@@ -268,26 +266,18 @@ impl SyncManager {
             }
         };
 
-        for _ in 0..self.sync_config.sync_req {
-            let start_height = height_range.0;
-            let end_height = {
-                if height_range.0 + self.sync_config.sync_interval <= height_range.1 {
-                    height_range.0 + self.sync_config.sync_interval
-                } else {
-                    height_range.1
-                }
-            };
-            req_vec.push(SyncBlockRequest {
-                start_height,
-                end_height,
-            });
-
-            height_range.0 = end_height + 1;
-
-            if height_range.0 > height_range.1 {
-                break;
+        let start_height = height_range.0;
+        let end_height = {
+            if height_range.0 + self.sync_config.sync_interval <= height_range.1 {
+                height_range.0 + self.sync_config.sync_interval
+            } else {
+                height_range.1
             }
-        }
+        };
+        req_vec.push(SyncBlockRequest {
+            start_height,
+            end_height,
+        });
 
         Some(req_vec)
     }
