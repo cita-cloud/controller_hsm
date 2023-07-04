@@ -164,8 +164,8 @@ async fn handle_sync_block(context: &Controller) -> statig::Response<State> {
         let chain = context.chain.read().await;
         chain.next_step(&global_status).await
     } {
-        ChainStep::SyncStep => Transition(State::Syncing {}),
-        ChainStep::OnlineStep => Transition(State::ParticipateInConsensus {}),
+        ChainStep::SyncStep => Transition(State::syncing()),
+        ChainStep::OnlineStep => Transition(State::participate_in_consensus()),
         ChainStep::BusyState => Handled,
     }
 }
@@ -203,9 +203,9 @@ async fn try_sync_block(context: &Controller, in_prepare_sync: bool) -> statig::
                     .await
                     .unwrap();
             }
-            Transition(State::PrepareSync {})
+            Transition(State::prepare_sync())
         }
-        ChainStep::OnlineStep => Transition(State::ParticipateInConsensus {}),
+        ChainStep::OnlineStep => Transition(State::participate_in_consensus()),
         ChainStep::BusyState => Handled,
     }
 }
