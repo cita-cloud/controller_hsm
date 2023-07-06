@@ -48,21 +48,17 @@ pub(crate) async fn grpc_serve(
     controller: Controller,
     controller_state_machine: Arc<RwLock<InitializedStateMachine<ControllerStateMachine>>>,
     config: ControllerConfig,
-) {
+    rx_signal: flume::Receiver<()>,
+) -> Result<(), StatusCodeEnum> {
     let grpc_port = config.controller_port.to_string();
     let addr_str = format!("0.0.0.0:{grpc_port}");
-    let addr = addr_str
-        .parse()
-        .map_err(|e: AddrParseError| {
-            warn!("parse grpc listen address failed: {:?} ", e);
-            StatusCodeEnum::FatalError
-        })
-        .unwrap();
+    let addr = addr_str.parse().map_err(|e: AddrParseError| {
+        warn!("parse grpc listen address failed: {:?} ", e);
+        StatusCodeEnum::FatalError
+    })?;
 
     let layer = if config.enable_metrics {
-        tokio::spawn(async move {
-            run_metrics_exporter(config.metrics_port).await.unwrap();
-        });
+        tokio::spawn(run_metrics_exporter(config.metrics_port));
 
         Some(
             tower::ServiceBuilder::new()
@@ -76,7 +72,10 @@ pub(crate) async fn grpc_serve(
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(CONTROLLER_DESCRIPTOR_SET)
         .build()
-        .unwrap();
+        .map_err(|e| {
+            warn!("register grpc reflection failed: {:?} ", e);
+            StatusCodeEnum::FatalError
+        })?;
 
     info!("start controller grpc server");
     let http2_keepalive_interval = config.http2_keepalive_interval;
@@ -115,13 +114,15 @@ pub(crate) async fn grpc_serve(
                 controller,
                 config.health_check_timeout,
             )))
-            .serve(addr)
+            .serve_with_shutdown(
+                addr,
+                cloud_util::graceful_shutdown::grpc_serve_listen_term(rx_signal),
+            )
             .await
             .map_err(|e| {
                 warn!("start controller grpc server failed: {:?} ", e);
                 StatusCodeEnum::FatalError
-            })
-            .unwrap();
+            })?;
     } else {
         Server::builder()
             .accept_http1(true)
@@ -154,12 +155,15 @@ pub(crate) async fn grpc_serve(
                 controller,
                 config.health_check_timeout,
             )))
-            .serve(addr)
+            .serve_with_shutdown(
+                addr,
+                cloud_util::graceful_shutdown::grpc_serve_listen_term(rx_signal),
+            )
             .await
             .map_err(|e| {
                 warn!("start controller grpc server failed: {:?} ", e);
                 StatusCodeEnum::FatalError
-            })
-            .unwrap();
+            })?;
     }
+    Ok(())
 }

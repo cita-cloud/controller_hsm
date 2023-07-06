@@ -32,9 +32,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time};
 
 use cita_cloud_proto::{network::RegisterInfo, status_code::StatusCodeEnum, storage::Regions};
-use cloud_util::{
-    network::register_network_msg_handler, panic_hook::set_panic_handler, storage::load_data,
-};
+use cloud_util::{network::register_network_msg_handler, storage::load_data};
 
 use crate::{
     config::ControllerConfig,
@@ -78,7 +76,6 @@ struct RunOpts {
 
 fn main() {
     ::std::env::set_var("RUST_BACKTRACE", "full");
-    set_panic_handler();
 
     let opts: Opts = Opts::parse();
 
@@ -87,15 +84,16 @@ fn main() {
     match opts.subcmd {
         SubCommand::Run(opts) => {
             let fin = run(opts);
-            warn!("unreachable: {:?}", fin);
+            if let Err(e) = fin {
+                warn!("unreachable: {:?}", e);
+            }
         }
     }
 }
 
 #[tokio::main]
 async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
-    #[cfg(not(windows))]
-    tokio::spawn(cloud_util::signal::handle_signals());
+    let rx_signal = cloud_util::graceful_shutdown::graceful_shutdown();
 
     // read consensus-config.toml
     let config = ControllerConfig::new(&opts.config_path);
@@ -215,6 +213,7 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
         controller.clone(),
         controller_state_machine.clone(),
         config.clone(),
+        rx_signal.clone(),
     ));
 
     let mut reconnect_interval =
@@ -247,7 +246,16 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
             },
             Ok(event) = event_receiver.recv_async() => {
                 controller_state_machine.write().await.handle_with_context(&event, &mut controller).await;
+            },
+            _ = rx_signal.recv_async() => {
+                info!("controller task exit!");
+                break;
+            },
+            else => {
+                debug!("controller task exit!");
+                break;
             }
         }
     }
+    Ok(())
 }
