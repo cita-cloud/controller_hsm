@@ -41,7 +41,7 @@ use crate::{
         auditor::Auditor, chain::Chain, genesis::GenesisBlock, pool::Pool,
         system_config::SystemConfig,
     },
-    crypto::{check_transactions, get_block_hash, hash_data},
+    crypto::{crypto_check_async, crypto_check_batch_async, hash_data},
     grpc_client::{
         consensus::reconfigure,
         executor::get_receipt_proof,
@@ -201,6 +201,7 @@ impl Controller {
         // send configuration to consensus
         let mut server_retry_interval =
             time::interval(Duration::from_secs(self.config.server_retry_interval));
+        // don't block at here
         tokio::spawn(async move {
             loop {
                 server_retry_interval.tick().await;
@@ -234,8 +235,10 @@ impl Controller {
 
         {
             let auditor = self.auditor.read().await;
-            auditor.check_raw_tx(&raw_tx).await?;
+            auditor.auditor_check(&raw_tx)?;
         }
+
+        crypto_check_async(raw_tx.clone()).await?;
 
         let res = {
             let mut pool = self.pool.write().await;
@@ -265,13 +268,13 @@ impl Controller {
         raw_txs: RawTransactions,
         broadcast: bool,
     ) -> Result<Hashes, StatusCodeEnum> {
-        check_transactions(&raw_txs).is_success()?;
+        crypto_check_batch_async(raw_txs.clone()).await?;
 
         let mut hashes = Vec::new();
         {
             let auditor = self.auditor.read().await;
             let mut pool = self.pool.write().await;
-            auditor.check_transactions(&raw_txs)?;
+            auditor.auditor_check_batch(&raw_txs)?;
             for raw_tx in raw_txs.body.clone() {
                 let hash = get_tx_hash(&raw_tx)?.to_vec();
                 if pool.insert(raw_tx) {
@@ -1233,10 +1236,13 @@ impl Controller {
         })?;
         let msg_hash = hash_data(&chain_status_bytes);
 
-        #[cfg(feature = "sm")]
-        let crypto = crypto_sm::crypto::Crypto::new(&self.private_key_path);
-        #[cfg(feature = "eth")]
-        let crypto = crypto_eth::crypto::Crypto::new(&self.private_key_path);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "sm")] {
+                let crypto = crypto_sm::crypto::Crypto::new(&self.private_key_path);
+            } else if #[cfg(feature = "eth")] {
+                let crypto = crypto_eth::crypto::Crypto::new(&self.private_key_path);
+            }
+        }
 
         let signature = crypto.sign_message(&msg_hash)?;
 
@@ -1302,10 +1308,13 @@ impl Controller {
             .unwrap();
         let msg_hash = hash_data(&chain_status_bytes);
 
-        #[cfg(feature = "sm")]
-        let crypto = crypto_sm::crypto::Crypto::new(&self.private_key_path);
-        #[cfg(feature = "eth")]
-        let crypto = crypto_eth::crypto::Crypto::new(&self.private_key_path);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "sm")] {
+                let crypto = crypto_sm::crypto::Crypto::new(&self.private_key_path);
+            } else if #[cfg(feature = "eth")] {
+                let crypto = crypto_eth::crypto::Crypto::new(&self.private_key_path);
+            }
+        }
 
         let signature = crypto.sign_message(&msg_hash).unwrap();
 

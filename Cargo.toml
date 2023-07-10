@@ -23,6 +23,8 @@ tonic-reflection = "0.9"
 tonic-web = "0.9"
 statig = { version = "0.3", features = ["async"] }
 flume = "0.10"
+rayon = "1.0"
+cfg-if = "1.0"
 
 cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs" }
 cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs" }

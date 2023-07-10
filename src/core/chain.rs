@@ -34,7 +34,7 @@ use crate::{
         pool::Pool,
         system_config::{SystemConfig, LOCK_ID_BLOCK_LIMIT, LOCK_ID_QUOTA_LIMIT},
     },
-    crypto::{check_transactions, get_block_hash, hash_data},
+    crypto::{crypto_check_batch_async, hash_data},
     grpc_client::{
         consensus::check_block,
         executor::exec_block,
@@ -418,11 +418,14 @@ impl Chain {
                 .ok_or(StatusCodeEnum::NoneBlockBody)?
                 .tx_hashes;
 
-            for tx_hash in tx_hashes {
-                if let Some(tx) = self.pool.read().await.pool_get_tx(tx_hash) {
-                    tx_list.push(tx);
-                } else {
-                    return Err(StatusCodeEnum::NoneRawTx);
+            {
+                let pool = self.pool.read().await;
+                for tx_hash in tx_hashes {
+                    if let Some(tx) = pool.pool_get_tx(tx_hash) {
+                        tx_list.push(tx);
+                    } else {
+                        return Err(StatusCodeEnum::NoneRawTx);
+                    }
                 }
             }
 
@@ -512,11 +515,11 @@ impl Chain {
 
         {
             let auditor = self.auditor.read().await;
-            auditor.check_transactions(block.body.as_ref().ok_or(StatusCodeEnum::NoneBlockBody)?)?
+            auditor
+                .auditor_check_batch(block.body.as_ref().ok_or(StatusCodeEnum::NoneBlockBody)?)?
         }
 
-        check_transactions(block.body.as_ref().ok_or(StatusCodeEnum::NoneBlockBody)?)
-            .is_success()?;
+        crypto_check_batch_async(block.body.clone().ok_or(StatusCodeEnum::NoneBlockBody)?).await?;
 
         self.finalize_block(block, block_hash.clone()).await?;
 
