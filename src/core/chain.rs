@@ -139,14 +139,8 @@ impl Chain {
         }
     }
 
-    pub async fn add_proposal(
-        &mut self,
-        global_status: &ChainStatus,
-        proposer: Vec<u8>,
-    ) -> Result<(), StatusCodeEnum> {
-        if self.next_step(global_status).await == ChainStep::SyncStep {
-            Err(StatusCodeEnum::NodeInSyncMode)
-        } else if self.own_proposal.is_some() {
+    pub async fn add_proposal(&mut self, proposer: Vec<u8>) -> Result<(), StatusCodeEnum> {
+        if self.own_proposal.is_some() {
             // already have own proposal
             Ok(())
         } else {
@@ -551,7 +545,7 @@ impl Chain {
         rd.get_system_config()
     }
 
-    pub async fn next_step(&self, global_status: &ChainStatus) -> ChainStep {
+    pub fn next_step(&self, global_status: &ChainStatus) -> ChainStep {
         if global_status.height > self.block_number && self.candidates.is_empty() {
             debug!("sync mode");
             ChainStep::SyncStep

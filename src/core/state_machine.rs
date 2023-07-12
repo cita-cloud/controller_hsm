@@ -162,7 +162,7 @@ async fn handle_sync_block(context: &Controller) -> statig::Response<State> {
     let (_, global_status) = context.get_global_status().await;
     match {
         let chain = context.chain.read().await;
-        chain.next_step(&global_status).await
+        chain.next_step(&global_status)
     } {
         ChainStep::SyncStep => Transition(State::syncing()),
         ChainStep::OnlineStep => Transition(State::participate_in_consensus()),
@@ -184,7 +184,7 @@ async fn try_sync_block(context: &Controller, in_prepare_sync: bool) -> statig::
     // try read chain state, if can't get chain default online state
     let res = {
         if let Ok(chain) = controller_clone.chain.try_read() {
-            chain.next_step(&global_status).await
+            chain.next_step(&global_status)
         } else {
             ChainStep::BusyState
         }

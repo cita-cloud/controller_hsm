@@ -492,10 +492,7 @@ impl Controller {
 
         let mut chain = self.chain.write().await;
         chain
-            .add_proposal(
-                &self.get_global_status().await.1,
-                self.validator_address.address.clone(),
-            )
+            .add_proposal(self.validator_address.address.clone())
             .await?;
         chain.get_proposal().await
     }
