@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use cita_cloud_proto::{
     blockchain::{RawTransaction, RawTransactions},
     status_code::StatusCodeEnum,
@@ -64,14 +66,14 @@ pub async fn recover_signature_async(
     }
 }
 
-pub async fn crypto_check_async(tx: RawTransaction) -> Result<(), StatusCodeEnum> {
+pub async fn crypto_check_async(tx: Arc<RawTransaction>) -> Result<(), StatusCodeEnum> {
     let (send, recv) = tokio::sync::oneshot::channel();
     rayon::spawn(move || {
         cfg_if::cfg_if! {
             if #[cfg(feature = "sm")] {
-                let _ = send.send(crypto_sm::sm::crypto_check(tx));
+                let _ = send.send(crypto_sm::sm::crypto_check(&tx));
             } else if #[cfg(feature = "eth")] {
-                let _ = send.send(crypto_eth::eth::crypto_check(tx));
+                let _ = send.send(crypto_eth::eth::crypto_check(&tx));
             }
         }
     });
@@ -84,14 +86,14 @@ pub async fn crypto_check_async(tx: RawTransaction) -> Result<(), StatusCodeEnum
     }
 }
 
-pub async fn crypto_check_batch_async(txs: RawTransactions) -> Result<(), StatusCodeEnum> {
+pub async fn crypto_check_batch_async(txs: Arc<RawTransactions>) -> Result<(), StatusCodeEnum> {
     let (send, recv) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         cfg_if::cfg_if! {
             if #[cfg(feature = "sm")] {
-                let _ = send.send(crypto_sm::sm::crypto_check_batch(txs));
+                let _ = send.send(crypto_sm::sm::crypto_check_batch(&txs));
             } else if #[cfg(feature = "eth")] {
-                let _ = send.send(crypto_eth::eth::crypto_check_batch(txs));
+                let _ = send.send(crypto_eth::eth::crypto_check_batch(&txs));
             }
         }
     });
