@@ -36,7 +36,7 @@ pub async fn assemble_proposal(
     block: &CompactBlock,
     height: u64,
 ) -> Result<Vec<u8>, StatusCodeEnum> {
-    let pre_state_root = get_last_stateroot(height).await?;
+    let pre_state_root = get_last_state_root(height).await?;
 
     let proposal = ProposalInner {
         proposal: Some(block.clone()),
@@ -52,7 +52,7 @@ pub async fn assemble_proposal(
     Ok(proposal_bytes)
 }
 
-pub async fn get_last_stateroot(h: u64) -> Result<Vec<u8>, StatusCodeEnum> {
+pub async fn get_last_state_root(h: u64) -> Result<Vec<u8>, StatusCodeEnum> {
     let pre_h = h - 1;
     let pre_height_bytes = pre_h.to_be_bytes().to_vec();
 

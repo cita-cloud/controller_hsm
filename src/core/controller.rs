@@ -417,9 +417,9 @@ impl Controller {
 
     pub async fn rpc_get_node_status(&self, state: &State) -> Result<NodeStatus, StatusCodeEnum> {
         let peers_count = get_network_status().await?.peer_count;
-        let peers_netinfo = get_peers_info().await?;
+        let peers_net_info = get_peers_info().await?;
         let mut peers_status = vec![];
-        for p in peers_netinfo.nodes {
+        for p in peers_net_info.nodes {
             let na = NodeAddress(p.origin);
             let (address, height) = self
                 .node_manager
@@ -620,7 +620,7 @@ impl Controller {
                     .ok_or(StatusCodeEnum::NoneBlockBody)?
                     .tx_hashes;
                 let tx_count = tx_hashes.len();
-                let mut transantion_data = Vec::new();
+                let mut transaction_data = Vec::new();
                 let mut miss_tx_hash_list = Vec::new();
                 for tx_hash in tx_hashes {
                     if let Some(tx) = self.pool.read().await.pool_get_tx(tx_hash) {
@@ -628,7 +628,7 @@ impl Controller {
                         if total_quota > sys_config.quota_limit {
                             return Err(StatusCodeEnum::QuotaUsedExceed);
                         }
-                        transantion_data.extend_from_slice(tx_hash);
+                        transaction_data.extend_from_slice(tx_hash);
                     } else {
                         miss_tx_hash_list.push(tx_hash);
                     }
@@ -651,7 +651,7 @@ impl Controller {
                     return Err(StatusCodeEnum::NoneRawTx);
                 }
 
-                let transactions_root = hash_data(&transantion_data);
+                let transactions_root = hash_data(&transaction_data);
                 if transactions_root != header.transactions_root {
                     warn!(
                         "check proposal({}) failed: header transactions_root: {}, controller calculate: {}",
@@ -781,11 +781,11 @@ impl Controller {
                     .address
                     .clone()
                     .ok_or(StatusCodeEnum::NoProvideAddress)?;
-                let node_orign = NodeAddress::from(&node);
+                let node_origin = NodeAddress::from(&node);
 
                 match self
                     .node_manager
-                    .set_node(&node_orign, status.clone())
+                    .set_node(&node_origin, status.clone())
                     .await
                 {
                     Ok(None) => {
@@ -810,14 +810,14 @@ impl Controller {
                             self.unicast_chain_status_init(msg.origin, chain_status_init)
                                 .await;
                             self.event_sender
-                                .send(Event::TryUpdateGlobalStatus(node_orign, status))
+                                .send(Event::TryUpdateGlobalStatus(node_origin, status))
                                 .unwrap();
                         }
                         return Err(status_code);
                     }
                 }
                 self.event_sender
-                    .send(Event::TryUpdateGlobalStatus(node_orign, status))
+                    .send(Event::TryUpdateGlobalStatus(node_origin, status))
                     .unwrap();
             }
             ControllerMsgType::ChainStatusInitRequestType => {
@@ -834,7 +834,7 @@ impl Controller {
 
                 let own_status = self.get_status().await;
                 let node = chain_status.address.clone().unwrap();
-                let node_orign = NodeAddress::from(&node);
+                let node_origin = NodeAddress::from(&node);
                 match chain_status.check(&own_status).await {
                     Ok(()) => {}
                     Err(e) => {
@@ -850,8 +850,8 @@ impl Controller {
                                     },
                                 )
                                 .await;
-                                self.delete_global_status(&node_orign).await;
-                                self.node_manager.set_ban_node(&node_orign).await?;
+                                self.delete_global_status(&node_origin).await;
+                                self.node_manager.set_ban_node(&node_origin).await?;
                             }
                             _ => {}
                         }
@@ -861,16 +861,16 @@ impl Controller {
 
                 match self
                     .node_manager
-                    .check_address_origin(&node_orign, NodeAddress(msg.origin))
+                    .check_address_origin(&node_origin, NodeAddress(msg.origin))
                     .await
                 {
                     Ok(true) => {
                         self.node_manager
-                            .set_node(&node_orign, chain_status.clone())
+                            .set_node(&node_origin, chain_status.clone())
                             .await?;
 
                         self.event_sender
-                            .send(Event::TryUpdateGlobalStatus(node_orign, chain_status))
+                            .send(Event::TryUpdateGlobalStatus(node_origin, chain_status))
                             .unwrap();
                     }
                     // give Ok or Err for process_network_msg is same
@@ -893,12 +893,12 @@ impl Controller {
                     match respond {
                         Respond::NotSameChain(node) => {
                             h160_address_check(Some(&node))?;
-                            let node_orign = NodeAddress::from(&node);
+                            let node_origin = NodeAddress::from(&node);
                             warn!(
-                                "process ChainStatusRespondType failed: remote check chain_status failed: NotSameChain. ban remote node. origin: {}", node_orign
+                                "process ChainStatusRespondType failed: remote check chain_status failed: NotSameChain. ban remote node. origin: {}", node_origin
                             );
-                            self.delete_global_status(&node_orign).await;
-                            self.node_manager.set_ban_node(&node_orign).await?;
+                            self.delete_global_status(&node_origin).await;
+                            self.node_manager.set_ban_node(&node_origin).await?;
                         }
                     }
                 }
@@ -935,12 +935,12 @@ impl Controller {
                     match sync_block_respond.respond {
                         // todo check origin
                         Some(Respond::MissBlock(node)) => {
-                            let node_orign = NodeAddress::from(&node);
-                            warn!("misbehavior: MissBlock({})", node_orign);
-                            controller_clone.delete_global_status(&node_orign).await;
+                            let node_origin = NodeAddress::from(&node);
+                            warn!("misbehavior: MissBlock({})", node_origin);
+                            controller_clone.delete_global_status(&node_origin).await;
                             controller_clone
                                 .node_manager
-                                .set_misbehavior_node(&node_orign)
+                                .set_misbehavior_node(&node_origin)
                                 .await
                                 .unwrap();
                         }
@@ -978,13 +978,13 @@ impl Controller {
                                         msg.origin
                                     );
                                     let node = sync_blocks.address.as_ref().unwrap();
-                                    let node_orign = NodeAddress::from(node);
+                                    let node_origin = NodeAddress::from(node);
                                     controller_clone
                                         .node_manager
-                                        .set_misbehavior_node(&node_orign)
+                                        .set_misbehavior_node(&node_origin)
                                         .await
                                         .unwrap();
-                                    controller_clone.delete_global_status(&node_orign).await;
+                                    controller_clone.delete_global_status(&node_origin).await;
                                 }
                             }
                         }
@@ -1028,10 +1028,10 @@ impl Controller {
                 use crate::protocol::sync_manager::sync_tx_respond::Respond;
                 match sync_tx_respond.respond {
                     Some(Respond::MissTx(node)) => {
-                        let node_orign = NodeAddress::from(&node);
-                        warn!("misbehavior: MissTx({})", node_orign);
-                        self.node_manager.set_misbehavior_node(&node_orign).await?;
-                        self.delete_global_status(&node_orign).await;
+                        let node_origin = NodeAddress::from(&node);
+                        warn!("misbehavior: MissTx({})", node_origin);
+                        self.node_manager.set_misbehavior_node(&node_origin).await?;
+                        self.delete_global_status(&node_origin).await;
                     }
                     Some(Respond::Ok(raw_tx)) => {
                         self.rpc_send_raw_transaction(raw_tx, false).await?;
@@ -1256,7 +1256,7 @@ impl Controller {
                 match old_cs.height.cmp(&current_cs.height) {
                     Ordering::Greater => {
                         error!(
-                            "node status rollbacked: old height: {}, current height: {}. set it misbehavior. origin: {}",
+                            "node status rollback: old height: {}, current height: {}. set it misbehavior. origin: {}",
                             old_cs.height,
                             current_cs.height,
                             &na

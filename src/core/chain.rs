@@ -298,7 +298,7 @@ impl Chain {
             );
         }
 
-        // update auditor pool and systemconfig
+        // update auditor pool and system_config
         // even empty block, we also need update current height of auditor
         {
             if let Some(raw_txs) = block.body.clone() {
@@ -396,7 +396,7 @@ impl Chain {
 
             if prev_hash != self.block_hash {
                 warn!(
-                    "commit block({}) failed: get prehash: 0x{}, correct prehash: 0x{}. hash: 0x{}",
+                    "commit block({}) failed: get prevhash: 0x{}, correct prevhash: 0x{}. hash: 0x{}",
                     height,
                     hex::encode(&prev_hash),
                     hex::encode(&self.block_hash),
@@ -491,7 +491,7 @@ impl Chain {
 
         if header.prevhash != self.block_hash {
             warn!(
-                "process block({}) failed: get prehash: 0x{}, correct prehash: 0x{}. hash: 0x{}",
+                "process block({}) failed: get prevhash: 0x{}, correct prevhash: 0x{}. hash: 0x{}",
                 height,
                 hex::encode(&header.prevhash),
                 hex::encode(&self.block_hash),
