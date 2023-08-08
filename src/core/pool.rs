@@ -17,11 +17,15 @@ use std::{
     cmp::{Eq, PartialEq},
     collections::HashSet,
     hash::{Hash, Hasher},
+    sync::Arc,
 };
 
 use cita_cloud_proto::blockchain::{raw_transaction::Tx, RawTransaction};
+use tokio::sync::RwLock;
 
-use crate::util::get_tx_quota;
+use crate::{grpc_client::storage::reload_transactions_pool, util::get_tx_quota};
+
+use super::auditor::Auditor;
 
 // wrapper type for Hash
 #[derive(Clone)]
@@ -70,6 +74,34 @@ impl Pool {
             block_limit,
             quota_limit,
         }
+    }
+
+    pub async fn init(&mut self, auditor: Arc<RwLock<Auditor>>) {
+        let mut txns = reload_transactions_pool()
+            .await
+            .map_or_else(|_| vec![], |txns| txns.body);
+        info!("pool init start: txns({})", txns.len());
+        {
+            let auditor = auditor.read().await;
+            let history_hashes_set: HashSet<_> = auditor
+                .history_hashes
+                .iter()
+                .flat_map(|(_, hashes)| hashes)
+                .collect();
+
+            txns.retain(|txn| !history_hashes_set.contains(&get_raw_tx_hash(txn).to_vec()));
+        }
+        for raw_tx in txns {
+            let tx_quota = get_tx_quota(&raw_tx).unwrap();
+            self.txns.insert(Txn(raw_tx));
+            self.pool_quota += tx_quota;
+        }
+
+        info!(
+            "pool init finished: txns({}), pool_quota({})",
+            self.txns.len(),
+            self.pool_quota
+        );
     }
 
     pub fn insert(&mut self, raw_tx: RawTransaction) -> bool {

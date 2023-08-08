@@ -49,7 +49,7 @@ use crate::{
         network_client,
         storage::{
             db_get_tx, get_compact_block, get_full_block, get_height_by_block_hash, get_proof,
-            get_state_root, load_tx_info,
+            get_state_root, load_tx_info, store_data,
         },
         storage_client,
     },
@@ -197,6 +197,7 @@ impl Controller {
                 .await
                 .unwrap();
             self.set_status(status.clone()).await;
+            self.pool.write().await.init(self.auditor.clone()).await;
         }
         // send configuration to consensus
         let mut server_retry_interval =
@@ -247,12 +248,33 @@ impl Controller {
         if res {
             if broadcast {
                 let mut f_pool = self.forward_pool.write().await;
-                f_pool.body.push(raw_tx);
+                f_pool.body.push(raw_tx.clone());
                 if f_pool.body.len() > self.config.count_per_batch {
                     self.broadcast_send_txs(f_pool.clone()).await;
                     f_pool.body.clear();
                 }
             }
+            // send to storage
+            tokio::spawn(async move {
+                let raw_txs = RawTransactions { body: vec![raw_tx] };
+                let mut raw_tx_bytes = Vec::new();
+                match raw_txs.encode(&mut raw_tx_bytes) {
+                    Ok(_) => {
+                        if store_data(
+                            i32::from(Regions::TransactionsPool) as u32,
+                            vec![0; 8],
+                            raw_tx_bytes,
+                        )
+                        .await
+                        .is_success()
+                        .is_err()
+                        {
+                            warn!("store raw tx failed");
+                        }
+                    }
+                    Err(_) => warn!("encode raw tx failed"),
+                }
+            });
             Ok(tx_hash)
         } else {
             warn!(
@@ -283,8 +305,29 @@ impl Controller {
             }
         }
         if broadcast {
-            self.broadcast_send_txs(raw_txs).await;
+            self.broadcast_send_txs(raw_txs.clone()).await;
         }
+        // send to storage
+        tokio::spawn(async move {
+            let mut raw_tx_bytes = Vec::new();
+            match raw_txs.encode(&mut raw_tx_bytes) {
+                Ok(_) => {
+                    if store_data(
+                        i32::from(Regions::TransactionsPool) as u32,
+                        vec![0; 8],
+                        raw_tx_bytes,
+                    )
+                    .await
+                    .is_success()
+                    .is_err()
+                    {
+                        warn!("store raw tx failed");
+                    }
+                }
+                Err(_) => warn!("encode raw tx failed"),
+            }
+        });
+
         Ok(Hashes { hashes })
     }
 

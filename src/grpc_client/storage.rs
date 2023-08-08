@@ -15,7 +15,9 @@
 use prost::Message;
 
 use cita_cloud_proto::{
-    blockchain::{raw_transaction::Tx::UtxoTx, Block, CompactBlock, RawTransaction},
+    blockchain::{
+        raw_transaction::Tx::UtxoTx, Block, CompactBlock, RawTransaction, RawTransactions,
+    },
     client::StorageClientTrait,
     common::{Proof, ProposalInner, StateRoot},
     controller::BlockNumber,
@@ -301,4 +303,24 @@ pub async fn get_hash_in_range(mut hash: Vec<u8>, height: u64) -> Result<Vec<u8>
         };
     }
     Ok(hash)
+}
+
+pub async fn reload_transactions_pool() -> Result<RawTransactions, StatusCodeEnum> {
+    let raw_txs_bytes = load_data(
+        storage_client(),
+        i32::from(Regions::TransactionsPool) as u32,
+        vec![0; 8],
+    )
+    .await
+    .map_err(|e| {
+        warn!("reload transactions pool failed: {}", e.to_string());
+        StatusCodeEnum::LoadError
+    })?;
+
+    let raw_txs = RawTransactions::decode(raw_txs_bytes.as_slice()).map_err(|_| {
+        warn!("reload transactions pool failed: decode RawTransactions failed");
+        StatusCodeEnum::DecodeError
+    })?;
+
+    Ok(raw_txs)
 }

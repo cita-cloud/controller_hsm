@@ -25,12 +25,18 @@ statig = { version = "0.3", features = ["async"] }
 flume = "0.10"
 rayon = "1.0"
 cfg-if = "1.0"
+futures = "0.3"
 
 cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs" }
 cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs" }
 
 crypto_sm = { git = "https://github.com/cita-cloud/crypto_sm", package = "crypto", optional = true }
 crypto_eth = { git = "https://github.com/cita-cloud/crypto_eth", package = "crypto", optional = true }
+
+[patch."https://github.com/cita-cloud/cloud-common-rs"]
+cloud-util = { package = "cloud-util", path = "../runner/cloud-common-rs/cloud-util" }
+cita_cloud_proto = { package = "cita_cloud_proto", path = "../runner/cloud-common-rs/cloud-proto" }
+
 
 [build-dependencies]
 tonic-build = "0.9"
