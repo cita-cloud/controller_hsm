@@ -197,7 +197,10 @@ impl Controller {
                 .await
                 .unwrap();
             self.set_status(status.clone()).await;
-            self.pool.write().await.init(self.auditor.clone()).await;
+
+            if self.config.tx_persistence {
+                self.pool.write().await.init(self.auditor.clone()).await;
+            }
         }
         // send configuration to consensus
         let mut server_retry_interval =
@@ -255,26 +258,28 @@ impl Controller {
                 }
             }
             // send to storage
-            tokio::spawn(async move {
-                let raw_txs = RawTransactions { body: vec![raw_tx] };
-                let mut raw_tx_bytes = Vec::new();
-                match raw_txs.encode(&mut raw_tx_bytes) {
-                    Ok(_) => {
-                        if store_data(
-                            i32::from(Regions::TransactionsPool) as u32,
-                            vec![0; 8],
-                            raw_tx_bytes,
-                        )
-                        .await
-                        .is_success()
-                        .is_err()
-                        {
-                            warn!("store raw tx failed");
+            if self.config.tx_persistence {
+                tokio::spawn(async move {
+                    let raw_txs = RawTransactions { body: vec![raw_tx] };
+                    let mut raw_tx_bytes = Vec::new();
+                    match raw_txs.encode(&mut raw_tx_bytes) {
+                        Ok(_) => {
+                            if store_data(
+                                i32::from(Regions::TransactionsPool) as u32,
+                                vec![0; 8],
+                                raw_tx_bytes,
+                            )
+                            .await
+                            .is_success()
+                            .is_err()
+                            {
+                                warn!("store raw tx failed");
+                            }
                         }
+                        Err(_) => warn!("encode raw tx failed"),
                     }
-                    Err(_) => warn!("encode raw tx failed"),
-                }
-            });
+                });
+            }
             Ok(tx_hash)
         } else {
             warn!(
@@ -308,25 +313,27 @@ impl Controller {
             self.broadcast_send_txs(raw_txs.clone()).await;
         }
         // send to storage
-        tokio::spawn(async move {
-            let mut raw_tx_bytes = Vec::new();
-            match raw_txs.encode(&mut raw_tx_bytes) {
-                Ok(_) => {
-                    if store_data(
-                        i32::from(Regions::TransactionsPool) as u32,
-                        vec![0; 8],
-                        raw_tx_bytes,
-                    )
-                    .await
-                    .is_success()
-                    .is_err()
-                    {
-                        warn!("store raw tx failed");
+        if self.config.tx_persistence {
+            tokio::spawn(async move {
+                let mut raw_tx_bytes = Vec::new();
+                match raw_txs.encode(&mut raw_tx_bytes) {
+                    Ok(_) => {
+                        if store_data(
+                            i32::from(Regions::TransactionsPool) as u32,
+                            vec![0; 8],
+                            raw_tx_bytes,
+                        )
+                        .await
+                        .is_success()
+                        .is_err()
+                        {
+                            warn!("store raw tx failed");
+                        }
                     }
+                    Err(_) => warn!("encode raw tx failed"),
                 }
-                Err(_) => warn!("encode raw tx failed"),
-            }
-        });
+            });
+        }
 
         Ok(Hashes { hashes })
     }

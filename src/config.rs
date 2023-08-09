@@ -92,6 +92,8 @@ pub struct ControllerConfig {
     pub is_danger: bool,
     /// log config
     pub log_config: LogConfig,
+    /// tx pool persistence
+    pub tx_persistence: bool,
 }
 
 impl Default for ControllerConfig {
@@ -129,6 +131,7 @@ impl Default for ControllerConfig {
             buffer_duration: 300,
             is_danger: false,
             log_config: Default::default(),
+            tx_persistence: false,
         }
     }
 }
