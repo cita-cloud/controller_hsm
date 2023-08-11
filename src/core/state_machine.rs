@@ -68,7 +68,7 @@ impl ControllerStateMachine {
             }
             Event::SyncBlock => handle_sync_block(context).await,
             Event::BroadcastCSI => {
-                context.handle_broadcast_csi().await;
+                let _ = context.handle_broadcast_csi().await;
                 Handled
             }
             Event::RecordAllNode => {
@@ -136,7 +136,9 @@ impl ControllerStateMachine {
 
     #[action]
     async fn enter_syncing(&self, context: &mut Controller) {
-        context.syncing_block().await;
+        if let Err(e) = context.syncing_block().await {
+            warn!("syncing block error: {:?}", e)
+        }
     }
 
     #[action]
@@ -197,11 +199,11 @@ async fn try_sync_block(context: &Controller, in_prepare_sync: bool) -> statig::
                 .get_sync_block_req(current_height, &global_status)
                 .await
             {
-                controller_clone
+                let _ = controller_clone
                     .unicast_sync_block(global_address.0, sync_req.clone())
                     .await
                     .await
-                    .unwrap();
+                    .map_err(|e| warn!("try_sync_block: unicast_sync_block error: {:?}", e));
             }
             Transition(State::prepare_sync())
         }

@@ -456,10 +456,10 @@ impl Controller {
                     controller_for_add.config.server_retry_interval,
                 ))
                 .await;
-                controller_for_add
+                let _ = controller_for_add
                     .event_sender
                     .send(Event::BroadcastCSI)
-                    .unwrap();
+                    .map_err(|e| warn!("rpc_add_node: send broadcast csi event failed: {}", e));
             });
         }
         res
@@ -729,7 +729,12 @@ impl Controller {
                     let mut wr = self.chain.write().await;
                     wr.clear_candidate();
                 }
-                self.event_sender.send(Event::TrySyncBlock).unwrap();
+                let _ = self.event_sender.send(Event::TrySyncBlock).map_err(|e| {
+                    warn!(
+                        "rpc_get_cross_chain_proof: send Event::TrySyncBlock failed: {:?}",
+                        e
+                    )
+                });
             }
             _ => {}
         }
@@ -765,7 +770,12 @@ impl Controller {
                 status.address = Some(self.local_address.clone());
                 self.set_status(status.clone()).await;
                 self.broadcast_chain_status(status).await;
-                self.event_sender.send(Event::TrySyncBlock).unwrap();
+                let _ = self.event_sender.send(Event::TrySyncBlock).map_err(|e| {
+                    warn!(
+                        "chain_commit_block: send Event::TrySyncBlock failed: {:?}",
+                        e
+                    )
+                });
                 Ok(config)
             }
             Err(StatusCodeEnum::ProposalTooHigh) => {
@@ -774,7 +784,12 @@ impl Controller {
                     let mut wr = self.chain.write().await;
                     wr.clear_candidate();
                 }
-                self.event_sender.send(Event::TrySyncBlock).unwrap();
+                let _ = self.event_sender.send(Event::TrySyncBlock).map_err(|e| {
+                    warn!(
+                        "chain_commit_block: send Event::TrySyncBlock failed: {:?}",
+                        e
+                    )
+                });
                 Err(StatusCodeEnum::ProposalTooHigh)
             }
             Err(e) => Err(e),
@@ -859,16 +874,25 @@ impl Controller {
                             let chain_status_init = self.make_csi(own_status).await?;
                             self.unicast_chain_status_init(msg.origin, chain_status_init)
                                 .await;
-                            self.event_sender
+                            let _ = self
+                                .event_sender
                                 .send(Event::TryUpdateGlobalStatus(node_origin, status))
-                                .unwrap();
+                                .map_err(|e|
+                                    warn!("process_network_msg: send Event::TryUpdateGlobalStatus failed: {:?}", e)
+                                );
                         }
                         return Err(status_code);
                     }
                 }
-                self.event_sender
+                let _ = self
+                    .event_sender
                     .send(Event::TryUpdateGlobalStatus(node_origin, status))
-                    .unwrap();
+                    .map_err(|e| {
+                        warn!(
+                            "process_network_msg: send Event::TryUpdateGlobalStatus failed: {:?}",
+                            e
+                        )
+                    });
             }
             ControllerMsgType::ChainStatusInitRequestType => {
                 let chain_status_init = self.make_csi(self.get_status().await).await?;
@@ -918,10 +942,12 @@ impl Controller {
                         self.node_manager
                             .set_node(&node_origin, chain_status.clone())
                             .await?;
-
-                        self.event_sender
+                        let _ = self
+                            .event_sender
                             .send(Event::TryUpdateGlobalStatus(node_origin, chain_status))
-                            .unwrap();
+                            .map_err(|e|
+                                warn!("process_network_msg: send Event::TryUpdateGlobalStatus failed: {:?}", e)
+                            );
                     }
                     // give Ok or Err for process_network_msg is same
                     Err(StatusCodeEnum::AddressOriginCheckError) | Ok(false) => {
@@ -965,9 +991,15 @@ impl Controller {
                     "get SyncBlockRequest: from origin: {:x}, height: {} - {}",
                     msg.origin, sync_block_request.start_height, sync_block_request.end_height
                 );
-                self.event_sender
+                let _ = self
+                    .event_sender
                     .send(Event::SyncBlockReq(sync_block_request, msg.origin))
-                    .unwrap();
+                    .map_err(|e| {
+                        warn!(
+                            "process_network_msg: send Event::SyncBlockReq failed: {:?}",
+                            e
+                        )
+                    });
             }
 
             ControllerMsgType::SyncBlockRespondType => {
@@ -988,11 +1020,10 @@ impl Controller {
                             let node_origin = NodeAddress::from(&node);
                             warn!("misbehavior: MissBlock({})", node_origin);
                             controller_clone.delete_global_status(&node_origin).await;
-                            controller_clone
+                            let _ = controller_clone
                                 .node_manager
                                 .set_misbehavior_node(&node_origin)
-                                .await
-                                .unwrap();
+                                .await;
                         }
                         Some(Respond::Ok(sync_blocks)) => {
                             // todo handle error
@@ -1008,10 +1039,12 @@ impl Controller {
                                         )
                                         .await
                                     {
-                                        controller_clone
+                                        let _ = controller_clone
                                             .event_sender
                                             .send(Event::SyncBlock)
-                                            .unwrap();
+                                            .map_err(|e|
+                                                warn!("process_network_msg: send Event::SyncBlock failed: {:?}", e)
+                                            );
                                     }
                                 }
                                 Err(StatusCodeEnum::ProvideAddressError)
@@ -1029,11 +1062,10 @@ impl Controller {
                                     );
                                     let node = sync_blocks.address.as_ref().unwrap();
                                     let node_origin = NodeAddress::from(node);
-                                    controller_clone
+                                    let _ = controller_clone
                                         .node_manager
                                         .set_misbehavior_node(&node_origin)
-                                        .await
-                                        .unwrap();
+                                        .await;
                                     controller_clone.delete_global_status(&node_origin).await;
                                 }
                             }
@@ -1202,7 +1234,12 @@ impl Controller {
             );
             self.update_global_status(node.to_owned(), status).await;
             if global_height > own_status.height {
-                self.event_sender.send(Event::TrySyncBlock).unwrap();
+                let _ = self.event_sender.send(Event::TrySyncBlock).map_err(|e| {
+                    warn!(
+                        "try_update_global_status: send TrySyncBlock event failed: {}",
+                        e
+                    )
+                });
             }
             if (!in_sync || global_height % self.config.force_sync_epoch == 0)
                 && self
@@ -1210,7 +1247,12 @@ impl Controller {
                     .contains_block(own_status.height + 1)
                     .await
             {
-                self.event_sender.send(Event::SyncBlock).unwrap();
+                let _ = self.event_sender.send(Event::SyncBlock).map_err(|e| {
+                    warn!(
+                        "try_update_global_status: send SyncBlock event failed: {}",
+                        e
+                    )
+                });
             }
 
             return Ok(true);
@@ -1218,7 +1260,12 @@ impl Controller {
 
         // request block if own height behind remote's
         if global_height > own_status.height {
-            self.event_sender.send(Event::TrySyncBlock).unwrap();
+            let _ = self.event_sender.send(Event::TrySyncBlock).map_err(|e| {
+                warn!(
+                    "try_update_global_status: send TrySyncBlock event failed: {}",
+                    e
+                )
+            });
         }
 
         Ok(false)
@@ -1341,18 +1388,15 @@ impl Controller {
         }
     }
 
-    pub async fn handle_broadcast_csi(&self) {
+    pub async fn handle_broadcast_csi(&self) -> Result<(), StatusCodeEnum> {
         info!("receive BroadCastCSI event");
         let status = self.get_status().await;
 
         let mut chain_status_bytes = Vec::new();
-        status
-            .encode(&mut chain_status_bytes)
-            .map_err(|_| {
-                warn!("process BroadCastCSI failed: encode ChainStatus failed");
-                StatusCodeEnum::EncodeError
-            })
-            .unwrap();
+        status.encode(&mut chain_status_bytes).map_err(|_| {
+            warn!("handle_broadcast_csi failed: encode ChainStatus failed");
+            StatusCodeEnum::EncodeError
+        })?;
         let msg_hash = hash_data(&chain_status_bytes);
 
         cfg_if::cfg_if! {
@@ -1363,7 +1407,7 @@ impl Controller {
             }
         }
 
-        let signature = crypto.sign_message(&msg_hash).unwrap();
+        let signature = crypto.sign_message(&msg_hash)?;
 
         self.broadcast_chain_status_init(ChainStatusInit {
             chain_status: Some(status),
@@ -1371,10 +1415,14 @@ impl Controller {
         })
         .await
         .await
-        .unwrap();
+        .map_err(|_| {
+            warn!("handle_broadcast_csi: broadcast ChainStatusInit failed");
+            StatusCodeEnum::FatalError
+        })?;
+        Ok(())
     }
 
-    pub async fn syncing_block(&self) {
+    pub async fn syncing_block(&self) -> Result<(), StatusCodeEnum> {
         let (global_address, _) = self.get_global_status().await;
         let mut own_status = self.get_status().await;
         let mut syncing = false;
@@ -1386,7 +1434,7 @@ impl Controller {
                 chain.clear_candidate();
                 match chain.process_block(block).await {
                     Ok((consensus_config, mut status)) => {
-                        reconfigure(consensus_config).await.is_success().unwrap();
+                        reconfigure(consensus_config).await.is_success()?;
                         status.address = Some(self.local_address.clone());
                         self.set_status(status.clone()).await;
                         own_status = status.clone();
@@ -1435,8 +1483,12 @@ impl Controller {
             }
         }
         if syncing {
-            self.event_sender.send(Event::TrySyncBlock).unwrap();
+            let _ = self
+                .event_sender
+                .send(Event::TrySyncBlock)
+                .map_err(|_| warn!("syncing_block: send TrySyncBlock event failed"));
         }
+        Ok(())
     }
 
     pub async fn handle_sync_block_req(&self, req: &SyncBlockRequest, origin: &u64) {
@@ -1492,7 +1544,10 @@ impl Controller {
             if self.get_global_status().await.1.height > inner_health_check.current_height {
                 self.chain.write().await.clear_candidate();
             }
-            self.event_sender.send(Event::BroadcastCSI).unwrap();
+            let _ = self
+                .event_sender
+                .send(Event::BroadcastCSI)
+                .map_err(|_| warn!("inner_health_check: send BroadcastCSI event failed"));
             inner_health_check.retry_limit += inner_health_check.tick;
             inner_health_check.tick = 0;
         } else if self.get_status().await.height < inner_health_check.current_height {

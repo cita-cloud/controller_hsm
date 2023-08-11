@@ -255,8 +255,7 @@ pub async fn get_hash_in_range(mut hash: Vec<u8>, height: u64) -> Result<Vec<u8>
         i32::from(Regions::TransactionHash2blockHeight) as u32,
         hash.clone(),
     )
-    .await
-    .unwrap();
+    .await?;
     let mut tx_height = u64_decode(height_bytes);
     while tx_height >= height {
         hash = match load_data(
