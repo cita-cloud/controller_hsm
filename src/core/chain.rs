@@ -285,7 +285,7 @@ impl Chain {
             };
 
             store_data(
-                i32::from(Regions::AllBlockData) as u32,
+                Regions::AllBlockData as u32,
                 block_height.to_be_bytes().to_vec(),
                 block_bytes,
             )
@@ -312,7 +312,7 @@ impl Chain {
                             // if sys_config changed, store utxo tx hash into global region
                             let lock_id = utxo_tx.transaction.as_ref().unwrap().lock_id;
                             store_data(
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 utxo_tx.transaction_hash,
                             )

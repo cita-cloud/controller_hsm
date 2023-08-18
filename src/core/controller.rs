@@ -265,7 +265,7 @@ impl Controller {
                     match raw_txs.encode(&mut raw_tx_bytes) {
                         Ok(_) => {
                             if store_data(
-                                i32::from(Regions::TransactionsPool) as u32,
+                                Regions::TransactionsPool as u32,
                                 vec![0; 8],
                                 raw_tx_bytes,
                             )
@@ -318,14 +318,10 @@ impl Controller {
                 let mut raw_tx_bytes = Vec::new();
                 match raw_txs.encode(&mut raw_tx_bytes) {
                     Ok(_) => {
-                        if store_data(
-                            i32::from(Regions::TransactionsPool) as u32,
-                            vec![0; 8],
-                            raw_tx_bytes,
-                        )
-                        .await
-                        .is_success()
-                        .is_err()
+                        if store_data(Regions::TransactionsPool as u32, vec![0; 8], raw_tx_bytes)
+                            .await
+                            .is_success()
+                            .is_err()
                         {
                             warn!("store raw tx failed");
                         }
@@ -341,7 +337,7 @@ impl Controller {
     pub async fn rpc_get_block_hash(&self, block_number: u64) -> Result<Vec<u8>, StatusCodeEnum> {
         load_data(
             storage_client(),
-            i32::from(Regions::BlockHash) as u32,
+            Regions::BlockHash as u32,
             block_number.to_be_bytes().to_vec(),
         )
         .await
@@ -383,7 +379,7 @@ impl Controller {
     ) -> Result<CompactBlock, StatusCodeEnum> {
         let block_number = load_data(
             storage_client(),
-            i32::from(Regions::BlockHash2blockHeight) as u32,
+            Regions::BlockHash2blockHeight as u32,
             hash.clone(),
         )
         .await
@@ -605,7 +601,7 @@ impl Controller {
                 //check pre_state_root in proposal
                 let pre_state_root = load_data(
                     storage_client(),
-                    i32::from(Regions::Result) as u32,
+                    Regions::Result as u32,
                     pre_height_bytes.clone(),
                 )
                 .await?;
@@ -637,7 +633,7 @@ impl Controller {
                 //check timestamp in block header
                 let pre_compact_block_bytes = load_data(
                     storage_client(),
-                    i32::from(Regions::CompactBlock) as u32,
+                    Regions::CompactBlock as u32,
                     pre_height_bytes.clone(),
                 )
                 .await?;
