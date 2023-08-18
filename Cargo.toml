@@ -8,10 +8,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.2", features = ["derive"] }
+clap = { version = "4.3", features = ["derive"] }
 tonic = "0.9"
 prost = "0.11"
-tokio = { version = "1.27", features = ["full"] }
+tokio = { version = "1.32", features = ["full"] }
 rand = "0.8"
 toml = "0.7"
 serde = "1.0"
@@ -22,8 +22,8 @@ tracing = "0.1"
 tonic-reflection = "0.9"
 tonic-web = "0.9"
 statig = { version = "0.3", features = ["async"] }
-flume = "0.10"
-rayon = "1.0"
+flume = "0.11"
+rayon = "1.7"
 cfg-if = "1.0"
 futures = "0.3"
 
@@ -32,11 +32,6 @@ cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cit
 
 crypto_sm = { git = "https://github.com/cita-cloud/crypto_sm", package = "crypto", optional = true }
 crypto_eth = { git = "https://github.com/cita-cloud/crypto_eth", package = "crypto", optional = true }
-
-[patch."https://github.com/cita-cloud/cloud-common-rs"]
-cloud-util = { package = "cloud-util", path = "../runner/cloud-common-rs/cloud-util" }
-cita_cloud_proto = { package = "cita_cloud_proto", path = "../runner/cloud-common-rs/cloud-proto" }
-
 
 [build-dependencies]
 tonic-build = "0.9"
