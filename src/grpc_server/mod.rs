@@ -58,13 +58,12 @@ pub(crate) async fn grpc_serve(
     })?;
 
     let layer = if config.enable_metrics {
-        tokio::spawn(run_metrics_exporter(config.metrics_port));
-
-        Some(
+        Some((
             tower::ServiceBuilder::new()
                 .layer(MiddlewareLayer::new(config.metrics_buckets))
                 .into_inner(),
-        )
+            tokio::spawn(run_metrics_exporter(config.metrics_port)),
+        ))
     } else {
         None
     };
@@ -81,7 +80,7 @@ pub(crate) async fn grpc_serve(
     let http2_keepalive_interval = config.http2_keepalive_interval;
     let http2_keepalive_timeout = config.http2_keepalive_timeout;
     let tcp_keepalive = config.tcp_keepalive;
-    if let Some(layer) = layer {
+    if let Some((layer, metrics_exporter_join_handle)) = layer {
         Server::builder()
             .accept_http1(true)
             .http2_keepalive_interval(Some(Duration::from_secs(http2_keepalive_interval)))
@@ -121,6 +120,7 @@ pub(crate) async fn grpc_serve(
             .await
             .map_err(|e| {
                 warn!("start controller grpc server failed: {:?} ", e);
+                metrics_exporter_join_handle.abort();
                 StatusCodeEnum::FatalError
             })?;
     } else {

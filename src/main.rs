@@ -203,12 +203,13 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
             .await,
     ));
 
-    tokio::spawn(grpc_serve(
+    let mut grpc_join_handle = tokio::spawn(grpc_serve(
         controller.clone(),
         controller_state_machine.clone(),
         config.clone(),
         rx_signal.clone(),
     ));
+    let mut restart_num = 0;
 
     let mut reconnect_interval =
         time::interval(Duration::from_secs(config.origin_node_reconnect_interval));
@@ -256,6 +257,25 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
             },
             else => {
                 debug!("controller task exit!");
+                break;
+            }
+        }
+        if grpc_join_handle.is_finished() {
+            if restart_num < 10 {
+                info!(
+                    "controller grpc server has exited, try to start again({})...",
+                    restart_num
+                );
+                tokio::time::sleep(Duration::from_secs(config.server_retry_interval)).await;
+                grpc_join_handle = tokio::spawn(grpc_serve(
+                    controller.clone(),
+                    controller_state_machine.clone(),
+                    config.clone(),
+                    rx_signal.clone(),
+                ));
+                restart_num += 1;
+            } else {
+                info!("controller grpc server has exited, and restart failed, exit!",);
                 break;
             }
         }
