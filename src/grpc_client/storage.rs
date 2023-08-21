@@ -15,7 +15,9 @@
 use prost::Message;
 
 use cita_cloud_proto::{
-    blockchain::{raw_transaction::Tx::UtxoTx, Block, CompactBlock, RawTransaction},
+    blockchain::{
+        raw_transaction::Tx::UtxoTx, Block, CompactBlock, RawTransaction, RawTransactions,
+    },
     client::StorageClientTrait,
     common::{Proof, ProposalInner, StateRoot},
     controller::BlockNumber,
@@ -36,7 +38,7 @@ pub async fn assemble_proposal(
     block: &CompactBlock,
     height: u64,
 ) -> Result<Vec<u8>, StatusCodeEnum> {
-    let pre_state_root = get_last_stateroot(height).await?;
+    let pre_state_root = get_last_state_root(height).await?;
 
     let proposal = ProposalInner {
         proposal: Some(block.clone()),
@@ -52,13 +54,13 @@ pub async fn assemble_proposal(
     Ok(proposal_bytes)
 }
 
-pub async fn get_last_stateroot(h: u64) -> Result<Vec<u8>, StatusCodeEnum> {
+pub async fn get_last_state_root(h: u64) -> Result<Vec<u8>, StatusCodeEnum> {
     let pre_h = h - 1;
     let pre_height_bytes = pre_h.to_be_bytes().to_vec();
 
     let state_root = load_data(
         storage_client(),
-        i32::from(Regions::Result) as u32,
+        Regions::Result as u32,
         pre_height_bytes.clone(),
     )
     .await?;
@@ -89,12 +91,7 @@ pub async fn load_data_maybe_empty(region: u32, key: Vec<u8>) -> Result<Vec<u8>,
 pub async fn get_full_block(height: u64) -> Result<Block, StatusCodeEnum> {
     let height_bytes = height.to_be_bytes().to_vec();
 
-    let block_bytes = load_data(
-        storage_client(),
-        i32::from(Regions::FullBlock) as u32,
-        height_bytes,
-    )
-    .await?;
+    let block_bytes = load_data(storage_client(), Regions::FullBlock as u32, height_bytes).await?;
 
     Block::decode(block_bytes.as_slice()).map_err(|_| {
         warn!("get full block failed: decode Block failed");
@@ -107,7 +104,7 @@ pub async fn db_get_tx(tx_hash: &[u8]) -> Result<RawTransaction, StatusCodeEnum>
 
     let tx_bytes = load_data(
         storage_client(),
-        i32::from(Regions::Transactions) as u32,
+        Regions::Transactions as u32,
         tx_hash_bytes,
     )
     .await
@@ -135,7 +132,7 @@ pub async fn load_tx_info(tx_hash: &[u8]) -> Result<(u64, u64), StatusCodeEnum> 
 
     let height_bytes = load_data(
         storage_client(),
-        i32::from(Regions::TransactionHash2blockHeight) as u32,
+        Regions::TransactionHash2blockHeight as u32,
         tx_hash_bytes.clone(),
     )
     .await
@@ -150,7 +147,7 @@ pub async fn load_tx_info(tx_hash: &[u8]) -> Result<(u64, u64), StatusCodeEnum> 
 
     let tx_index_bytes = load_data(
         storage_client(),
-        i32::from(Regions::TransactionIndex) as u32,
+        Regions::TransactionIndex as u32,
         tx_hash_bytes,
     )
     .await
@@ -172,7 +169,7 @@ pub async fn load_tx_info(tx_hash: &[u8]) -> Result<(u64, u64), StatusCodeEnum> 
 pub async fn get_height_by_block_hash(hash: Vec<u8>) -> Result<BlockNumber, StatusCodeEnum> {
     let block_number = load_data(
         storage_client(),
-        i32::from(Regions::BlockHash2blockHeight) as u32,
+        Regions::BlockHash2blockHeight as u32,
         hash.clone(),
     )
     .await
@@ -193,7 +190,7 @@ pub async fn get_compact_block(height: u64) -> Result<CompactBlock, StatusCodeEn
 
     let compact_block_bytes = load_data(
         storage_client(),
-        i32::from(Regions::CompactBlock) as u32,
+        Regions::CompactBlock as u32,
         height_bytes.clone(),
     )
     .await
@@ -216,16 +213,12 @@ pub async fn get_compact_block(height: u64) -> Result<CompactBlock, StatusCodeEn
 pub async fn get_proof(height: u64) -> Result<Proof, StatusCodeEnum> {
     let height_bytes = height.to_be_bytes().to_vec();
 
-    let proof = load_data(
-        storage_client(),
-        i32::from(Regions::Proof) as u32,
-        height_bytes,
-    )
-    .await
-    .map_err(|e| {
-        warn!("get proof({}) failed: {}", height, e.to_string());
-        StatusCodeEnum::NoProof
-    })?;
+    let proof = load_data(storage_client(), Regions::Proof as u32, height_bytes)
+        .await
+        .map_err(|e| {
+            warn!("get proof({}) failed: {}", height, e.to_string());
+            StatusCodeEnum::NoProof
+        })?;
 
     Ok(Proof { proof })
 }
@@ -233,16 +226,12 @@ pub async fn get_proof(height: u64) -> Result<Proof, StatusCodeEnum> {
 pub async fn get_state_root(height: u64) -> Result<StateRoot, StatusCodeEnum> {
     let height_bytes = height.to_be_bytes().to_vec();
 
-    let state_root = load_data(
-        storage_client(),
-        i32::from(Regions::Result) as u32,
-        height_bytes,
-    )
-    .await
-    .map_err(|e| {
-        warn!("get state_root({}) failed: {}", height, e.to_string());
-        StatusCodeEnum::NoStateRoot
-    })?;
+    let state_root = load_data(storage_client(), Regions::Result as u32, height_bytes)
+        .await
+        .map_err(|e| {
+            warn!("get state_root({}) failed: {}", height, e.to_string());
+            StatusCodeEnum::NoStateRoot
+        })?;
 
     Ok(StateRoot { state_root })
 }
@@ -250,20 +239,13 @@ pub async fn get_state_root(height: u64) -> Result<StateRoot, StatusCodeEnum> {
 pub async fn get_hash_in_range(mut hash: Vec<u8>, height: u64) -> Result<Vec<u8>, StatusCodeEnum> {
     let height_bytes = load_data(
         storage_client(),
-        i32::from(Regions::TransactionHash2blockHeight) as u32,
+        Regions::TransactionHash2blockHeight as u32,
         hash.clone(),
     )
-    .await
-    .unwrap();
+    .await?;
     let mut tx_height = u64_decode(height_bytes);
     while tx_height >= height {
-        hash = match load_data(
-            storage_client(),
-            i32::from(Regions::Transactions) as u32,
-            hash.clone(),
-        )
-        .await
-        {
+        hash = match load_data(storage_client(), Regions::Transactions as u32, hash.clone()).await {
             Ok(raw_tx_bytes) => {
                 if let UtxoTx(tx) = RawTransaction::decode(raw_tx_bytes.as_slice())
                     .unwrap()
@@ -293,7 +275,7 @@ pub async fn get_hash_in_range(mut hash: Vec<u8>, height: u64) -> Result<Vec<u8>
         } else {
             let height_bytes = load_data(
                 storage_client(),
-                i32::from(Regions::TransactionHash2blockHeight) as u32,
+                Regions::TransactionHash2blockHeight as u32,
                 hash.clone(),
             )
             .await?;
@@ -301,4 +283,24 @@ pub async fn get_hash_in_range(mut hash: Vec<u8>, height: u64) -> Result<Vec<u8>
         };
     }
     Ok(hash)
+}
+
+pub async fn reload_transactions_pool() -> Result<RawTransactions, StatusCodeEnum> {
+    let raw_txs_bytes = load_data(
+        storage_client(),
+        Regions::TransactionsPool as u32,
+        vec![0; 8],
+    )
+    .await
+    .map_err(|e| {
+        warn!("reload transactions pool failed: {}", e.to_string());
+        StatusCodeEnum::LoadError
+    })?;
+
+    let raw_txs = RawTransactions::decode(raw_txs_bytes.as_slice()).map_err(|_| {
+        warn!("reload transactions pool failed: decode RawTransactions failed");
+        StatusCodeEnum::DecodeError
+    })?;
+
+    Ok(raw_txs)
 }

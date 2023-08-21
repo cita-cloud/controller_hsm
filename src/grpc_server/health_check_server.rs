@@ -48,7 +48,7 @@ impl Health for HealthCheckServer {
         &self,
         _request: Request<HealthCheckRequest>,
     ) -> Result<Response<HealthCheckResponse>, Status> {
-        info!("healthcheck entry!");
+        info!("health_check entry!");
         let height = self.controller.rpc_get_block_number(true).await.unwrap();
         let timestamp = unix_now();
         let old_height = self.height.load(Ordering::Relaxed);
@@ -58,14 +58,14 @@ impl Health for HealthCheckServer {
             self.height.store(height, Ordering::Relaxed);
             self.timestamp.store(timestamp, Ordering::Relaxed);
             info!(
-                "healthcheck: block increase: {} - {}, timestamp: {}",
+                "health_check: block increase: {} - {}, timestamp: {}",
                 old_height, height, timestamp
             );
             ServingStatus::Serving.into()
         } else {
             // height not increase for a long time
             info!(
-                "healthcheck: block not increase: {}, timestamp: {} - {}",
+                "health_check: block not increase: {}, timestamp: {} - {}",
                 height, old_timestamp, timestamp
             );
             if timestamp - old_timestamp > self.timeout * 1000 {

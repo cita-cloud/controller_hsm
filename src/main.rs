@@ -145,12 +145,7 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
     loop {
         server_retry_interval.tick().await;
         {
-            match load_data_maybe_empty(
-                i32::from(Regions::Global) as u32,
-                0u64.to_be_bytes().to_vec(),
-            )
-            .await
-            {
+            match load_data_maybe_empty(Regions::Global as u32, 0u64.to_be_bytes().to_vec()).await {
                 Ok(current_block_number_bytes) => {
                     info!("storage service ready, get current height success");
                     if current_block_number_bytes.is_empty() {
@@ -162,11 +157,10 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
                         current_block_number = u64_decode(current_block_number_bytes);
                         current_block_hash = load_data(
                             storage_client(),
-                            i32::from(Regions::Global) as u32,
+                            Regions::Global as u32,
                             1u64.to_be_bytes().to_vec(),
                         )
-                        .await
-                        .unwrap();
+                        .await?;
                     }
                     break;
                 }
@@ -229,15 +223,24 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
             _ = reconnect_interval.tick() => {
                 event_sender
                     .send(Event::BroadcastCSI)
-                    .unwrap();
+                    .map_err(|e| {
+                        warn!("send broadcast csi event failed: {}", e);
+                        StatusCodeEnum::FatalError
+                    })?;
                 event_sender
                     .send(Event::RecordAllNode)
-                    .unwrap();
+                    .map_err(|e| {
+                        warn!("send record all node event failed: {}", e);
+                        StatusCodeEnum::FatalError
+                    })?;
             },
             _ = inner_health_check_interval.tick() => {
                 event_sender
                     .send(Event::InnerHealthCheck)
-                    .unwrap();
+                    .map_err(|e| {
+                        warn!("send inner health check event failed: {}", e);
+                        StatusCodeEnum::FatalError
+                    })?;
             },
             _ = forward_interval.tick() => {
                 controller

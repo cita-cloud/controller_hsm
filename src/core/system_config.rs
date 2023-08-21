@@ -119,7 +119,7 @@ impl SystemConfig {
             // region 0 global
             match load_data(
                 storage_client(),
-                i32::from(Regions::Global) as u32,
+                Regions::Global as u32,
                 lock_id.to_be_bytes().to_vec(),
             )
             .await
@@ -156,7 +156,7 @@ impl SystemConfig {
                         LOCK_ID_VERSION => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 self.version.to_be_bytes().to_vec(),
                             )
@@ -166,7 +166,7 @@ impl SystemConfig {
                         LOCK_ID_CHAIN_ID => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 self.chain_id.clone(),
                             )
@@ -176,7 +176,7 @@ impl SystemConfig {
                         LOCK_ID_ADMIN => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 self.admin.clone(),
                             )
@@ -186,7 +186,7 @@ impl SystemConfig {
                         LOCK_ID_BLOCK_INTERVAL => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 self.block_interval.to_be_bytes().to_vec(),
                             )
@@ -200,7 +200,7 @@ impl SystemConfig {
                             }
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 validators,
                             )
@@ -210,7 +210,7 @@ impl SystemConfig {
                         LOCK_ID_EMERGENCY_BRAKE => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 vec![],
                             )
@@ -220,7 +220,7 @@ impl SystemConfig {
                         LOCK_ID_BLOCK_LIMIT => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 self.block_limit.to_be_bytes().to_vec(),
                             )
@@ -230,7 +230,7 @@ impl SystemConfig {
                         LOCK_ID_QUOTA_LIMIT => {
                             store_data(
                                 storage_client(),
-                                i32::from(Regions::Global) as u32,
+                                Regions::Global as u32,
                                 lock_id.to_be_bytes().to_vec(),
                                 self.quota_limit.to_be_bytes().to_vec(),
                             )
@@ -357,7 +357,7 @@ impl SystemConfig {
     pub async fn modify_sys_config_by_utxotx_hash(&mut self, utxo_hash: Vec<u8>) -> StatusCodeEnum {
         match load_data(
             storage_client(),
-            i32::from(Regions::Transactions) as u32,
+            Regions::Transactions as u32,
             utxo_hash.clone(),
         )
         .await

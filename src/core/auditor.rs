@@ -24,6 +24,7 @@ use cita_cloud_proto::{
     },
     status_code::StatusCodeEnum,
 };
+use futures::{stream::FuturesUnordered, StreamExt};
 
 use crate::{
     core::system_config::{SystemConfig, LOCK_ID_BUTTON, LOCK_ID_VERSION},
@@ -32,7 +33,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct Auditor {
-    history_hashes: HashMap<u64, HashSet<Vec<u8>>>,
+    pub history_hashes: HashMap<u64, HashSet<Vec<u8>>>,
     current_block_number: u64,
     sys_config: SystemConfig,
 }
@@ -62,13 +63,34 @@ impl Auditor {
             1u64
         };
 
+        let mut history_hashes_num = 0;
+        let mut futures = FuturesUnordered::new();
+
         for h in begin_block_number..=init_block_number {
-            let block = get_compact_block(h).await.unwrap();
-            let block_body = block.body.unwrap();
-            self.history_hashes
-                .insert(h, HashSet::from_iter(block_body.tx_hashes));
+            futures.push(get_compact_block(h));
         }
+
+        while let Some(result) = futures.next().await {
+            match result {
+                Ok(block) => {
+                    let block_body = block.body.unwrap();
+                    history_hashes_num += block_body.tx_hashes.len();
+                    self.history_hashes.insert(
+                        block.header.unwrap().height,
+                        HashSet::from_iter(block_body.tx_hashes),
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to get compact block: {}", e);
+                }
+            }
+        }
+
         self.current_block_number = init_block_number;
+        info!(
+            "Auditor init finished: history_hashes({})",
+            history_hashes_num
+        );
     }
 
     pub fn insert_tx_hash(&mut self, h: u64, hash_list: Vec<Vec<u8>>) {
