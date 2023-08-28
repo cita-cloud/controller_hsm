@@ -532,7 +532,7 @@ impl Controller {
         &self,
         state: &State,
     ) -> Result<(u64, Vec<u8>), StatusCodeEnum> {
-        if state.matches_super(&Superstate::Sync {}) {
+        if matches!(state, State::Syncing {}) {
             return Err(StatusCodeEnum::NodeInSyncMode);
         }
 
