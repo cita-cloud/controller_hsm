@@ -79,6 +79,7 @@ impl ControllerStateMachine {
                 context.inner_health_check().await;
                 Handled
             }
+            Event::TrySyncBlock => try_sync_block(context).await,
             _ => Super,
         }
     }
@@ -97,7 +98,6 @@ impl ControllerStateMachine {
                     .await;
                 Handled
             }
-            Event::TrySyncBlock => try_sync_block(context).await,
             _ => Super,
         }
     }
@@ -117,21 +117,15 @@ impl ControllerStateMachine {
     }
 
     #[state(superstate = "sync")]
-    async fn prepare_sync(&self, context: &mut Controller, event: &Event) -> Response<State> {
-        debug!("sync: `{event:?}`");
-        match event {
-            Event::TrySyncBlock => try_sync_block(context).await,
-            _ => Super,
-        }
+    async fn prepare_sync(&self, event: &Event) -> Response<State> {
+        debug!("prepare_sync: `{event:?}`");
+        Super
     }
 
     #[state(superstate = "sync", entry_action = "enter_syncing")]
-    async fn syncing(&self, context: &mut Controller, event: &Event) -> Response<State> {
-        debug!("sync: `{event:?}`");
-        match event {
-            Event::TrySyncBlock => try_sync_block(context).await,
-            _ => Super,
-        }
+    async fn syncing(&self, event: &Event) -> Response<State> {
+        debug!("syncing: `{event:?}`");
+        Super
     }
 
     #[action]
