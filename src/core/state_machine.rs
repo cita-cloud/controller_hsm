@@ -79,6 +79,7 @@ impl ControllerStateMachine {
                 context.inner_health_check().await;
                 Handled
             }
+            Event::TrySyncBlock => try_sync_block(context).await,
             _ => Super,
         }
     }
@@ -97,7 +98,6 @@ impl ControllerStateMachine {
                     .await;
                 Handled
             }
-            Event::TrySyncBlock => try_sync_block(context, false).await,
             _ => Super,
         }
     }
@@ -117,21 +117,15 @@ impl ControllerStateMachine {
     }
 
     #[state(superstate = "sync")]
-    async fn prepare_sync(&self, context: &mut Controller, event: &Event) -> Response<State> {
-        debug!("sync: `{event:?}`");
-        match event {
-            Event::TrySyncBlock => try_sync_block(context, true).await,
-            _ => Super,
-        }
+    async fn prepare_sync(&self, event: &Event) -> Response<State> {
+        debug!("prepare_sync: `{event:?}`");
+        Super
     }
 
     #[state(superstate = "sync", entry_action = "enter_syncing")]
-    async fn syncing(&self, context: &mut Controller, event: &Event) -> Response<State> {
-        debug!("sync: `{event:?}`");
-        match event {
-            Event::TrySyncBlock => try_sync_block(context, false).await,
-            _ => Super,
-        }
+    async fn syncing(&self, event: &Event) -> Response<State> {
+        debug!("syncing: `{event:?}`");
+        Super
     }
 
     #[action]
@@ -172,20 +166,14 @@ async fn handle_sync_block(context: &Controller) -> statig::Response<State> {
     }
 }
 
-async fn try_sync_block(context: &Controller, in_prepare_sync: bool) -> statig::Response<State> {
-    let (_, global_status) = context.get_global_status().await;
-    // sync mode will return exclude global_height % context.config.force_sync_epoch == 0
-    if in_prepare_sync && global_status.height % context.config.force_sync_epoch != 0 {
-        return Handled;
-    }
+async fn try_sync_block(context: &Controller) -> statig::Response<State> {
+    let (global_address, global_status) = context.get_global_status().await;
 
     let current_height = context.get_status().await.height;
-    let controller_clone = context.clone();
-    let (global_address, global_status) = controller_clone.get_global_status().await;
 
     // try read chain state, if can't get chain default online state
     let res = {
-        if let Ok(chain) = controller_clone.chain.try_read() {
+        if let Ok(chain) = context.chain.try_read() {
             chain.next_step(&global_status)
         } else {
             ChainStep::BusyState
@@ -194,12 +182,12 @@ async fn try_sync_block(context: &Controller, in_prepare_sync: bool) -> statig::
 
     match res {
         ChainStep::SyncStep => {
-            if let Some(sync_req) = controller_clone
+            if let Some(sync_req) = context
                 .sync_manager
                 .get_sync_block_req(current_height, &global_status)
                 .await
             {
-                let _ = controller_clone
+                let _ = context
                     .unicast_sync_block(global_address.0, sync_req.clone())
                     .await
                     .await
