@@ -549,7 +549,9 @@ impl Chain {
     }
 
     pub fn next_step(&self, global_status: &ChainStatus) -> ChainStep {
-        if global_status.height > self.block_number && self.candidates.is_empty() {
+        if global_status.height > self.block_number + 1
+            || (global_status.height > self.block_number && self.candidates.is_empty())
+        {
             debug!("sync mode");
             ChainStep::SyncStep
         } else {
