@@ -27,11 +27,11 @@ rayon = "1.8"
 cfg-if = "1.0"
 futures = "0.3"
 
-cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs" }
-cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs" }
+cloud-util = "=0.8.0"
+cita_cloud_proto = "=6.7.2"
 
-crypto_sm = { git = "https://github.com/cita-cloud/crypto_sm", package = "crypto", optional = true }
-crypto_eth = { git = "https://github.com/cita-cloud/crypto_eth", package = "crypto", optional = true }
+crypto_sm = { git = "https://github.com/cita-cloud/crypto_sm", package = "crypto", optional = true, branch = "v6.7.2" }
+crypto_eth = { git = "https://github.com/cita-cloud/crypto_eth", package = "crypto", optional = true, branch = "v6.7.2" }
 
 [build-dependencies]
 tonic-build = "0.10"
