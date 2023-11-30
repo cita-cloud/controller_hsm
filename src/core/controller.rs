@@ -309,7 +309,7 @@ impl Controller {
                 }
             }
         }
-        if broadcast {
+        if broadcast && !hashes.is_empty() {
             self.broadcast_send_txs(raw_txs.clone()).await;
         }
         // send to storage
@@ -1133,7 +1133,7 @@ impl Controller {
                     StatusCodeEnum::DecodeError
                 })?;
 
-                self.batch_transactions(body, false).await?;
+                self.batch_transactions(body, true).await?;
             }
 
             ControllerMsgType::Noop => {
