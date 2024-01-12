@@ -156,10 +156,11 @@ impl ControllerStateMachine {
 async fn handle_sync_block(context: &Controller) -> statig::Response<State> {
     debug!("receive SyncBlock event");
     let (_, global_status) = context.get_global_status().await;
-    match {
+    let res = {
         let chain = context.chain.read().await;
         chain.next_step(&global_status)
-    } {
+    };
+    match res {
         ChainStep::SyncStep => Transition(State::syncing()),
         ChainStep::OnlineStep => Transition(State::participate_in_consensus()),
         ChainStep::BusyState => Handled,
