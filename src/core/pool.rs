@@ -21,6 +21,7 @@ use std::{
 };
 
 use cita_cloud_proto::blockchain::{raw_transaction::Tx, RawTransaction};
+use indexmap::IndexSet;
 use tokio::sync::RwLock;
 
 use crate::{grpc_client::storage::reload_transactions_pool, util::get_tx_quota};
@@ -60,7 +61,7 @@ fn get_raw_tx_hash(raw_tx: &RawTransaction) -> &[u8] {
 }
 
 pub struct Pool {
-    txns: HashSet<Txn>,
+    txns: IndexSet<Txn>,
     pool_quota: u64,
     block_limit: u64,
     quota_limit: u64,
@@ -78,7 +79,7 @@ pub enum PoolError {
 impl Pool {
     pub fn new(block_limit: u64, quota_limit: u64) -> Self {
         Pool {
-            txns: HashSet::new(),
+            txns: IndexSet::new(),
             pool_quota: 0,
             block_limit,
             quota_limit,
