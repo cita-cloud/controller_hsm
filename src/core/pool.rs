@@ -64,6 +64,15 @@ pub struct Pool {
     pool_quota: u64,
     block_limit: u64,
     quota_limit: u64,
+    warn_quota: u64,
+    busy_quota: u64,
+    in_busy: bool,
+}
+
+#[derive(Debug)]
+pub enum PoolError {
+    DupTransaction,
+    TooManyRequests,
 }
 
 impl Pool {
@@ -73,6 +82,9 @@ impl Pool {
             pool_quota: 0,
             block_limit,
             quota_limit,
+            warn_quota: quota_limit * 30,
+            busy_quota: quota_limit * 50,
+            in_busy: false,
         }
     }
 
@@ -104,13 +116,24 @@ impl Pool {
         );
     }
 
-    pub fn insert(&mut self, raw_tx: RawTransaction) -> bool {
-        let tx_quota = get_tx_quota(&raw_tx).unwrap();
-        let ret = self.txns.insert(Txn(raw_tx));
-        if ret {
-            self.pool_quota += tx_quota;
+    pub fn insert(&mut self, raw_tx: RawTransaction) -> Result<(), PoolError> {
+        if self.in_busy {
+            Err(PoolError::TooManyRequests)
+        } else {
+            let tx_quota = get_tx_quota(&raw_tx).unwrap();
+            if self.pool_quota + tx_quota > self.busy_quota {
+                self.in_busy = true;
+                Err(PoolError::TooManyRequests)
+            } else {
+                let ret = self.txns.insert(Txn(raw_tx));
+                if ret {
+                    self.pool_quota += tx_quota;
+                    Ok(())
+                } else {
+                    Err(PoolError::DupTransaction)
+                }
+            }
         }
-        ret
     }
 
     pub fn remove(&mut self, tx_hash_list: &[Vec<u8>]) {
@@ -124,12 +147,24 @@ impl Pool {
             }
             self.txns.remove(tx_hash.as_slice());
         }
+        if self.pool_quota < self.warn_quota {
+            self.in_busy = false;
+        }
     }
 
     pub fn package(&mut self, height: u64) -> (Vec<Vec<u8>>, u64) {
         let block_limit = self.block_limit;
-        self.txns
-            .retain(|txn| tx_is_valid(&txn.0, height, block_limit));
+        self.txns.retain(|txn| {
+            let tx_is_valid = tx_is_valid(&txn.0, height, block_limit);
+            if !tx_is_valid {
+                let tx_quota = get_tx_quota(&txn.0).unwrap();
+                self.pool_quota -= tx_quota;
+            }
+            tx_is_valid
+        });
+        if self.pool_quota < self.warn_quota {
+            self.in_busy = false;
+        }
         let mut quota_limit = self.quota_limit;
         let mut pack_tx = vec![];
         for txn in self.txns.iter().cloned() {
