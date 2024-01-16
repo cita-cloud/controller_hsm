@@ -38,10 +38,7 @@ use cloud_util::{
 use crate::{
     config::ControllerConfig,
     core::{
-        auditor::Auditor,
-        chain::Chain,
-        genesis::GenesisBlock,
-        pool::{Pool, PoolError},
+        auditor::Auditor, chain::Chain, genesis::GenesisBlock, pool::Pool,
         system_config::SystemConfig,
     },
     crypto::{crypto_check_async, crypto_check_batch_async, hash_data},
@@ -251,51 +248,45 @@ impl Controller {
             let mut pool = self.pool.write().await;
             pool.insert(raw_tx.clone())
         };
-        match res {
-            Ok(_) => {
-                if broadcast {
-                    let mut f_pool = self.forward_pool.write().await;
-                    f_pool.body.push(raw_tx.clone());
-                    if f_pool.body.len() > self.config.count_per_batch {
-                        self.broadcast_send_txs(f_pool.clone()).await;
-                        f_pool.body.clear();
-                    }
+        if res {
+            if broadcast {
+                let mut f_pool = self.forward_pool.write().await;
+                f_pool.body.push(raw_tx.clone());
+                if f_pool.body.len() > self.config.count_per_batch {
+                    self.broadcast_send_txs(f_pool.clone()).await;
+                    f_pool.body.clear();
                 }
-                // send to storage
-                if self.config.tx_persistence {
-                    tokio::spawn(async move {
-                        let raw_txs = RawTransactions { body: vec![raw_tx] };
-                        let mut raw_tx_bytes = Vec::new();
-                        match raw_txs.encode(&mut raw_tx_bytes) {
-                            Ok(_) => {
-                                if store_data(
-                                    Regions::TransactionsPool as u32,
-                                    vec![0; 8],
-                                    raw_tx_bytes,
-                                )
-                                .await
-                                .is_success()
-                                .is_err()
-                                {
-                                    warn!("store raw tx failed");
-                                }
+            }
+            // send to storage
+            if self.config.tx_persistence {
+                tokio::spawn(async move {
+                    let raw_txs = RawTransactions { body: vec![raw_tx] };
+                    let mut raw_tx_bytes = Vec::new();
+                    match raw_txs.encode(&mut raw_tx_bytes) {
+                        Ok(_) => {
+                            if store_data(
+                                Regions::TransactionsPool as u32,
+                                vec![0; 8],
+                                raw_tx_bytes,
+                            )
+                            .await
+                            .is_success()
+                            .is_err()
+                            {
+                                warn!("store raw tx failed");
                             }
-                            Err(_) => warn!("encode raw tx failed"),
                         }
-                    });
-                }
-                Ok(tx_hash)
+                        Err(_) => warn!("encode raw tx failed"),
+                    }
+                });
             }
-            Err(e) => {
-                warn!(
-                    "rpc send raw transaction failed: {e:?}. hash: 0x{}",
-                    hex::encode(&tx_hash)
-                );
-                match e {
-                    PoolError::TooManyRequests => Err(StatusCodeEnum::TooManyRequests),
-                    PoolError::DupTransaction => Err(StatusCodeEnum::DupTransaction),
-                }
-            }
+            Ok(tx_hash)
+        } else {
+            warn!(
+                "rpc send raw transaction failed: tx already in pool. hash: 0x{}",
+                hex::encode(&tx_hash)
+            );
+            Err(StatusCodeEnum::DupTransaction)
         }
     }
 
@@ -313,7 +304,7 @@ impl Controller {
             auditor.auditor_check_batch(&raw_txs)?;
             for raw_tx in raw_txs.body.clone() {
                 let hash = get_tx_hash(&raw_tx)?.to_vec();
-                if pool.insert(raw_tx).is_ok() {
+                if pool.insert(raw_tx) {
                     hashes.push(Hash { hash })
                 }
             }
@@ -506,6 +497,7 @@ impl Controller {
             peers_status,
             is_danger: self.config.is_danger,
             init_block_number: self.init_block_number,
+            waiting_block: self.pool.read().await.waiting_block(),
         };
         Ok(node_status)
     }
