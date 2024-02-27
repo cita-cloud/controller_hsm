@@ -123,7 +123,7 @@ impl Pool {
             if let Some(tx_quota) = tx_quota {
                 self.pool_quota -= tx_quota;
             }
-            self.txns.remove(tx_hash.as_slice());
+            self.txns.shift_remove(tx_hash.as_slice());
         }
     }
 
