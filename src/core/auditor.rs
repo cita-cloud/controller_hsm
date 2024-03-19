@@ -31,6 +31,11 @@ use crate::{
     grpc_client::storage::get_compact_block,
 };
 
+pub const AMEND_ADDRESS: [u8; 20] = [
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0x01, 0x00, 0x02,
+];
+
 #[derive(Clone)]
 pub struct Auditor {
     pub history_hashes: HashMap<u64, HashSet<Vec<u8>>>,
@@ -171,6 +176,12 @@ impl Auditor {
 
                 if let Some(tx) = &normal_tx.transaction {
                     self.check_normal_tx_fields(tx)?;
+                    if tx.to.as_slice() == AMEND_ADDRESS {
+                        // check tx sender for amend tx
+                        if normal_tx.witness.as_ref().unwrap().sender != self.sys_config.admin {
+                            return Err(StatusCodeEnum::AdminCheckError);
+                        }
+                    }
                 } else {
                     return Err(StatusCodeEnum::NoneTransaction);
                 }
