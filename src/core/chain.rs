@@ -28,12 +28,7 @@ use cita_cloud_proto::{
 use cloud_util::{common::extract_compact, unix_now};
 
 use crate::{
-    core::{
-        auditor::Auditor,
-        genesis::GenesisBlock,
-        pool::Pool,
-        system_config::{SystemConfig, LOCK_ID_BLOCK_LIMIT, LOCK_ID_QUOTA_LIMIT},
-    },
+    core::{auditor::Auditor, genesis::GenesisBlock, pool::Pool, system_config::SystemConfig},
     crypto::{crypto_check_batch_async, hash_data},
     grpc_client::{
         consensus::check_block,
@@ -306,7 +301,9 @@ impl Chain {
                     if let Some(Tx::UtxoTx(utxo_tx)) = raw_tx.tx.clone() {
                         let res = {
                             let mut auditor = self.auditor.write().await;
-                            auditor.update_system_config(&utxo_tx)
+                            auditor.update_system_config(&utxo_tx);
+                            let mut pool = self.pool.write().await;
+                            pool.update_system_config(&utxo_tx)
                         };
                         if res {
                             // if sys_config changed, store utxo tx hash into global region
@@ -318,15 +315,6 @@ impl Chain {
                             )
                             .await
                             .is_success()?;
-                            match lock_id {
-                                LOCK_ID_BLOCK_LIMIT | LOCK_ID_QUOTA_LIMIT => {
-                                    let sys_config = self.get_system_config().await;
-                                    let mut pool = self.pool.write().await;
-                                    pool.set_block_limit(sys_config.block_limit);
-                                    pool.set_quota_limit(sys_config.quota_limit);
-                                }
-                                _ => {}
-                            }
                         }
                     };
                 }
