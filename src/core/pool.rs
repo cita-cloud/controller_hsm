@@ -20,13 +20,18 @@ use std::{
     sync::Arc,
 };
 
-use cita_cloud_proto::blockchain::{raw_transaction::Tx, RawTransaction};
+use cita_cloud_proto::blockchain::{
+    raw_transaction::Tx, RawTransaction, UnverifiedUtxoTransaction,
+};
 use indexmap::IndexSet;
 use tokio::sync::RwLock;
 
 use crate::{grpc_client::storage::reload_transactions_pool, util::get_tx_quota};
 
-use super::auditor::Auditor;
+use super::{
+    auditor::Auditor,
+    system_config::{SystemConfig, LOCK_ID_BUTTON, LOCK_ID_VERSION},
+};
 
 // wrapper type for Hash
 #[derive(Clone)]
@@ -63,17 +68,15 @@ fn get_raw_tx_hash(raw_tx: &RawTransaction) -> &[u8] {
 pub struct Pool {
     txns: IndexSet<Txn>,
     pool_quota: u64,
-    block_limit: u64,
-    quota_limit: u64,
+    sys_config: SystemConfig,
 }
 
 impl Pool {
-    pub fn new(block_limit: u64, quota_limit: u64) -> Self {
+    pub fn new(sys_config: SystemConfig) -> Self {
         Pool {
             txns: IndexSet::new(),
             pool_quota: 0,
-            block_limit,
-            quota_limit,
+            sys_config,
         }
     }
 
@@ -128,16 +131,17 @@ impl Pool {
     }
 
     pub fn package(&mut self, height: u64) -> (Vec<Vec<u8>>, u64) {
-        let block_limit = self.block_limit;
+        let system_config = &self.sys_config;
+        let block_limit = system_config.block_limit;
         self.txns.retain(|txn| {
-            let tx_is_valid = tx_is_valid(&txn.0, height, block_limit);
+            let tx_is_valid = tx_is_valid(system_config, &txn.0, height, block_limit);
             if !tx_is_valid {
                 let tx_quota = get_tx_quota(&txn.0).unwrap();
                 self.pool_quota -= tx_quota;
             }
             tx_is_valid
         });
-        let mut quota_limit = self.quota_limit;
+        let mut quota_limit = system_config.quota_limit;
         let mut pack_tx = vec![];
         for txn in self.txns.iter().cloned() {
             let tx_quota = get_tx_quota(&txn.0).unwrap();
@@ -150,7 +154,7 @@ impl Pool {
                 }
             }
         }
-        (pack_tx, self.quota_limit - quota_limit)
+        (pack_tx, system_config.quota_limit - quota_limit)
     }
 
     pub fn pool_status(&self) -> (usize, u64) {
@@ -162,27 +166,47 @@ impl Pool {
     }
 
     pub fn waiting_block(&self) -> u64 {
-        self.pool_quota / self.quota_limit
+        self.pool_quota / self.sys_config.quota_limit
     }
 
-    pub fn set_block_limit(&mut self, block_limit: u64) {
-        self.block_limit = block_limit;
-    }
-
-    pub fn set_quota_limit(&mut self, quota_limit: u64) {
-        self.quota_limit = quota_limit;
+    pub fn update_system_config(&mut self, tx: &UnverifiedUtxoTransaction) -> bool {
+        self.sys_config.update(tx, false)
     }
 }
 
-fn tx_is_valid(raw_tx: &RawTransaction, height: u64, block_limit: u64) -> bool {
-    match raw_tx.tx {
+fn tx_is_valid(
+    sys_config: &SystemConfig,
+    raw_tx: &RawTransaction,
+    height: u64,
+    block_limit: u64,
+) -> bool {
+    match &raw_tx.tx {
         Some(Tx::NormalTx(ref normal_tx)) => match normal_tx.transaction {
             Some(ref tx) => {
                 height < tx.valid_until_block && tx.valid_until_block <= height + block_limit
             }
             None => false,
         },
-        Some(Tx::UtxoTx(_)) => true,
+        Some(Tx::UtxoTx(utxo_tx)) => {
+            // check utxo tx sender
+            if utxo_tx.witnesses[0].sender != sys_config.admin {
+                return false;
+            }
+
+            if let Some(utxo_tx) = utxo_tx.transaction.as_ref() {
+                if utxo_tx.version != sys_config.version {
+                    return false;
+                }
+                let lock_id = utxo_tx.lock_id;
+                if !(LOCK_ID_VERSION..LOCK_ID_BUTTON).contains(&lock_id) {
+                    return false;
+                }
+                let hash = sys_config.utxo_tx_hashes.get(&lock_id).cloned().unwrap();
+                hash == utxo_tx.pre_tx_hash
+            } else {
+                false
+            }
+        }
         None => false,
     }
 }
