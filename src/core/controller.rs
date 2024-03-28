@@ -196,7 +196,11 @@ impl Controller {
             self.set_status(status.clone()).await;
 
             if self.config.tx_persistence {
-                self.pool.write().await.init(self.auditor.clone()).await;
+                self.pool
+                    .write()
+                    .await
+                    .init(self.auditor.clone(), init_block_number)
+                    .await;
             }
         }
         // send configuration to consensus
