@@ -144,7 +144,7 @@ impl Chain {
 
             let (tx_hash_list, quota) = {
                 let mut pool = self.pool.write().await;
-                let ret = pool.package(self.block_number + 1);
+                let ret = pool.package();
                 let (pool_len, pool_quota) = pool.pool_status();
                 info!(
                     "package proposal({}): pool len: {}, pool quota: {}",
@@ -326,7 +326,7 @@ impl Chain {
                 .write()
                 .await
                 .insert_tx_hash(block_height, tx_hash_list.clone());
-            self.pool.write().await.remove(&tx_hash_list);
+            self.pool.write().await.remove(&tx_hash_list, block_height);
             info!(
                 "update auditor and pool, tx_hash_list len {}",
                 tx_hash_list.len()

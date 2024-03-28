@@ -80,26 +80,30 @@ impl Pool {
         }
     }
 
-    pub async fn init(&mut self, auditor: Arc<RwLock<Auditor>>) {
-        let mut txns = reload_transactions_pool()
+    pub async fn init(&mut self, auditor: Arc<RwLock<Auditor>>, init_block_number: u64) {
+        let txns = reload_transactions_pool()
             .await
             .map_or_else(|_| vec![], |txns| txns.body);
         info!("pool init start: txns({})", txns.len());
-        {
-            let auditor = auditor.read().await;
-            let history_hashes_set: HashSet<_> = auditor
-                .history_hashes
-                .iter()
-                .flat_map(|(_, hashes)| hashes)
-                .collect();
+        let history_hashes_set: HashSet<_> = auditor
+            .read()
+            .await
+            .history_hashes
+            .iter()
+            .flat_map(|(_, hashes)| hashes.clone())
+            .collect();
 
-            txns.retain(|txn| !history_hashes_set.contains(&get_raw_tx_hash(txn).to_vec()));
-        }
-        for raw_tx in txns {
-            let tx_quota = get_tx_quota(&raw_tx).unwrap();
-            self.txns.insert(Txn(raw_tx));
-            self.pool_quota += tx_quota;
-        }
+        let system_config = &self.sys_config;
+        let next_height = init_block_number + 1;
+        txns.iter().for_each(|txn| {
+            if !history_hashes_set.contains(&get_raw_tx_hash(txn).to_vec())
+                && tx_is_valid(system_config, txn, next_height)
+            {
+                let tx_quota = get_tx_quota(txn).unwrap();
+                self.txns.insert(Txn(txn.clone()));
+                self.pool_quota += tx_quota;
+            }
+        });
 
         info!(
             "pool init finished: txns({}), pool_quota({})",
@@ -117,30 +121,22 @@ impl Pool {
         ret
     }
 
-    pub fn remove(&mut self, tx_hash_list: &[Vec<u8>]) {
-        for tx_hash in tx_hash_list {
-            let tx_quota = self
-                .txns
-                .get(tx_hash.as_slice())
-                .map(|txn| get_tx_quota(&txn.0).unwrap());
-            if let Some(tx_quota) = tx_quota {
-                self.pool_quota -= tx_quota;
-            }
-            self.txns.shift_remove(tx_hash.as_slice());
-        }
-    }
-
-    pub fn package(&mut self, height: u64) -> (Vec<Vec<u8>>, u64) {
+    pub fn remove(&mut self, tx_hash_list: &[Vec<u8>], height: u64) {
         let system_config = &self.sys_config;
-        let block_limit = system_config.block_limit;
+        let next_height = height + 1;
         self.txns.retain(|txn| {
-            let tx_is_valid = tx_is_valid(system_config, &txn.0, height, block_limit);
+            let tx_is_valid = !tx_hash_list.contains(&get_raw_tx_hash(&txn.0).to_vec())
+                && tx_is_valid(system_config, &txn.0, next_height);
             if !tx_is_valid {
                 let tx_quota = get_tx_quota(&txn.0).unwrap();
                 self.pool_quota -= tx_quota;
             }
             tx_is_valid
         });
+    }
+
+    pub fn package(&mut self) -> (Vec<Vec<u8>>, u64) {
+        let system_config = &self.sys_config;
         let mut quota_limit = system_config.quota_limit;
         let mut pack_tx = vec![];
         for txn in self.txns.iter().cloned() {
@@ -174,16 +170,12 @@ impl Pool {
     }
 }
 
-fn tx_is_valid(
-    sys_config: &SystemConfig,
-    raw_tx: &RawTransaction,
-    height: u64,
-    block_limit: u64,
-) -> bool {
+fn tx_is_valid(sys_config: &SystemConfig, raw_tx: &RawTransaction, height: u64) -> bool {
     match &raw_tx.tx {
         Some(Tx::NormalTx(ref normal_tx)) => match normal_tx.transaction {
             Some(ref tx) => {
-                height < tx.valid_until_block && tx.valid_until_block <= height + block_limit
+                height < tx.valid_until_block
+                    && tx.valid_until_block <= height + sys_config.block_limit
             }
             None => false,
         },
