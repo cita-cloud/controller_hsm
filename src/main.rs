@@ -219,35 +219,53 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
     ));
     let mut forward_interval = time::interval(Duration::from_micros(config.buffer_duration));
 
+    // create timer task
+    let controller_for_timer = controller.clone();
+    let rx_signal_for_timer = rx_signal.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = reconnect_interval.tick() => {
+                    let _ = event_sender
+                        .send(Event::BroadcastCSI)
+                        .map_err(|e| {
+                            warn!("send broadcast csi event failed: {}", e);
+                            StatusCodeEnum::FatalError
+                        });
+                    let _ = event_sender
+                        .send(Event::RecordAllNode)
+                        .map_err(|e| {
+                            warn!("send record all node event failed: {}", e);
+                            StatusCodeEnum::FatalError
+                        });
+                },
+                _ = inner_health_check_interval.tick() => {
+                    let _ = event_sender
+                        .send(Event::InnerHealthCheck)
+                        .map_err(|e| {
+                            warn!("send inner health check event failed: {}", e);
+                            StatusCodeEnum::FatalError
+                        });
+                },
+                _ = forward_interval.tick() => {
+                    controller_for_timer
+                        .retransmission_tx()
+                        .await;
+                },
+                _ = rx_signal_for_timer.recv_async() => {
+                    info!("timer task exit!");
+                    break;
+                },
+                else => {
+                    debug!("timer task exit!");
+                    break;
+                }
+            }
+        }
+    });
+
     loop {
         tokio::select! {
-            _ = reconnect_interval.tick() => {
-                event_sender
-                    .send(Event::BroadcastCSI)
-                    .map_err(|e| {
-                        warn!("send broadcast csi event failed: {}", e);
-                        StatusCodeEnum::FatalError
-                    })?;
-                event_sender
-                    .send(Event::RecordAllNode)
-                    .map_err(|e| {
-                        warn!("send record all node event failed: {}", e);
-                        StatusCodeEnum::FatalError
-                    })?;
-            },
-            _ = inner_health_check_interval.tick() => {
-                event_sender
-                    .send(Event::InnerHealthCheck)
-                    .map_err(|e| {
-                        warn!("send inner health check event failed: {}", e);
-                        StatusCodeEnum::FatalError
-                    })?;
-            },
-            _ = forward_interval.tick() => {
-                controller
-                    .retransmission_tx()
-                    .await;
-            },
             Ok(event) = event_receiver.recv_async() => {
                 controller_state_machine.write().await.handle_with_context(&event, &mut controller).await;
             },
