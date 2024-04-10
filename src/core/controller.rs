@@ -254,8 +254,11 @@ impl Controller {
                 let mut f_pool = self.forward_pool.write().await;
                 f_pool.body.push(raw_tx.clone());
                 if f_pool.body.len() > self.config.count_per_batch {
-                    self.broadcast_send_txs(f_pool.clone()).await;
+                    let txs = RawTransactions {
+                        body: f_pool.body.clone(),
+                    };
                     f_pool.body.clear();
+                    self.broadcast_send_txs(txs).await;
                 }
             }
             // send to storage
@@ -301,8 +304,8 @@ impl Controller {
         let mut hashes = Vec::new();
         {
             let auditor = self.auditor.read().await;
-            let mut pool = self.pool.write().await;
             auditor.auditor_check_batch(&raw_txs)?;
+            let mut pool = self.pool.write().await;
             for raw_tx in raw_txs.body.clone() {
                 let hash = get_tx_hash(&raw_tx)?.to_vec();
                 if pool.insert(raw_tx) {
@@ -1561,8 +1564,11 @@ impl Controller {
     pub async fn retransmission_tx(&self) {
         let mut f_pool = self.forward_pool.write().await;
         if !f_pool.body.is_empty() {
-            self.broadcast_send_txs(f_pool.clone()).await;
+            let txs = RawTransactions {
+                body: f_pool.body.clone(),
+            };
             f_pool.body.clear();
+            self.broadcast_send_txs(txs).await;
         }
     }
 }
