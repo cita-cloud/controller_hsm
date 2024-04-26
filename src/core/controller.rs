@@ -258,32 +258,23 @@ impl Controller {
                         body: f_pool.body.clone(),
                     };
                     f_pool.body.clear();
+
+                    // send to storage
+                    if self.config.tx_persistence {
+                        let raw_txs = txs.clone();
+                        txs_persistence(raw_txs);
+                    }
+
                     self.broadcast_send_txs(txs).await;
                 }
-            }
-            // send to storage
-            if self.config.tx_persistence {
-                tokio::spawn(async move {
+            } else {
+                // send to storage
+                if self.config.tx_persistence {
                     let raw_txs = RawTransactions { body: vec![raw_tx] };
-                    let mut raw_tx_bytes = Vec::new();
-                    match raw_txs.encode(&mut raw_tx_bytes) {
-                        Ok(_) => {
-                            if store_data(
-                                Regions::TransactionsPool as u32,
-                                vec![0; 8],
-                                raw_tx_bytes,
-                            )
-                            .await
-                            .is_success()
-                            .is_err()
-                            {
-                                warn!("store raw tx failed");
-                            }
-                        }
-                        Err(_) => warn!("encode raw tx failed"),
-                    }
-                });
+                    txs_persistence(raw_txs);
+                }
             }
+
             Ok(tx_hash)
         } else {
             warn!(
@@ -1568,7 +1559,32 @@ impl Controller {
                 body: f_pool.body.clone(),
             };
             f_pool.body.clear();
+
+            // send to storage
+            if self.config.tx_persistence {
+                let raw_txs = txs.clone();
+                txs_persistence(raw_txs);
+            }
+
             self.broadcast_send_txs(txs).await;
         }
     }
+}
+
+fn txs_persistence(raw_txs: RawTransactions) {
+    tokio::spawn(async move {
+        let mut raw_tx_bytes = Vec::new();
+        match raw_txs.encode(&mut raw_tx_bytes) {
+            Ok(_) => {
+                if store_data(Regions::TransactionsPool as u32, vec![0; 8], raw_tx_bytes)
+                    .await
+                    .is_success()
+                    .is_err()
+                {
+                    warn!("store raw txs failed");
+                }
+            }
+            Err(_) => warn!("encode raw txs failed"),
+        }
+    });
 }
