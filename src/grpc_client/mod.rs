@@ -48,7 +48,7 @@ pub fn init_grpc_client(config: &ControllerConfig) {
         .set({
             let client_options = ClientOptions::new(
                 CLIENT_NAME.to_string(),
-                format!("http://127.0.0.1:{}", config.consensus_port),
+                format!("http://localhost:{}", config.consensus_port),
             );
             match client_options.connect_consensus() {
                 Ok(retry_client) => retry_client,
@@ -60,7 +60,7 @@ pub fn init_grpc_client(config: &ControllerConfig) {
         .set({
             let client_options = ClientOptions::new(
                 CLIENT_NAME.to_string(),
-                format!("http://127.0.0.1:{}", config.storage_port),
+                format!("http://localhost:{}", config.storage_port),
             );
             match client_options.connect_storage() {
                 Ok(retry_client) => retry_client,
@@ -72,7 +72,7 @@ pub fn init_grpc_client(config: &ControllerConfig) {
         .set({
             let client_options = ClientOptions::new(
                 CLIENT_NAME.to_string(),
-                format!("http://127.0.0.1:{}", config.executor_port),
+                format!("http://localhost:{}", config.executor_port),
             );
             match client_options.connect_executor() {
                 Ok(retry_client) => retry_client,
@@ -84,7 +84,7 @@ pub fn init_grpc_client(config: &ControllerConfig) {
         .set({
             let client_options = ClientOptions::new(
                 CLIENT_NAME.to_string(),
-                format!("http://127.0.0.1:{}", config.executor_port),
+                format!("http://localhost:{}", config.executor_port),
             );
             match client_options.connect_evm() {
                 Ok(retry_client) => retry_client,
@@ -96,7 +96,7 @@ pub fn init_grpc_client(config: &ControllerConfig) {
         .set({
             let client_options = ClientOptions::new(
                 CLIENT_NAME.to_string(),
-                format!("http://127.0.0.1:{}", config.network_port),
+                format!("http://localhost:{}", config.network_port),
             );
             match client_options.connect_network() {
                 Ok(retry_client) => retry_client,

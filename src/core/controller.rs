@@ -440,7 +440,7 @@ impl Controller {
         });
 
         let controller_for_add = self.clone();
-        let code = StatusCodeEnum::from(res.clone());
+        let code = StatusCodeEnum::from(res);
         if code == StatusCodeEnum::Success || code == StatusCodeEnum::AddExistedPeer {
             tokio::spawn(async move {
                 time::sleep(Duration::from_secs(

@@ -119,7 +119,7 @@ async fn run(opts: RunOpts) -> Result<(), StatusCodeEnum> {
         // register endpoint
         let request = RegisterInfo {
             module_name: "controller".to_owned(),
-            hostname: "127.0.0.1".to_owned(),
+            hostname: "localhost".to_owned(),
             port: grpc_port.clone(),
         };
 
