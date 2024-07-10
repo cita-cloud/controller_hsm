@@ -96,7 +96,7 @@ impl Pool {
         let system_config = &self.sys_config;
         let next_height = init_block_number + 1;
         txns.iter().for_each(|txn| {
-            if !history_hashes_set.contains(&get_raw_tx_hash(txn).to_vec())
+            if !history_hashes_set.contains(get_raw_tx_hash(txn))
                 && tx_is_valid(system_config, txn, next_height)
             {
                 let tx_quota = get_tx_quota(txn).unwrap();

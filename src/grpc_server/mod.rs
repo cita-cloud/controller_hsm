@@ -51,7 +51,7 @@ pub(crate) async fn grpc_serve(
     rx_signal: flume::Receiver<()>,
 ) -> Result<(), StatusCodeEnum> {
     let grpc_port = config.controller_port.to_string();
-    let addr_str = format!("0.0.0.0:{grpc_port}");
+    let addr_str = format!("[::]:{grpc_port}");
     let addr = addr_str.parse().map_err(|e: AddrParseError| {
         warn!("parse grpc listen address failed: {:?} ", e);
         StatusCodeEnum::FatalError

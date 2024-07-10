@@ -33,12 +33,6 @@ use crate::{
     util::{get_block_hash, u64_decode},
 };
 
-#[derive(Debug)]
-pub struct ChainStatusWithFlag {
-    pub status: ChainStatus,
-    pub broadcast_or_not: bool,
-}
-
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChainStatus {
     #[prost(uint32, tag = "1")]
