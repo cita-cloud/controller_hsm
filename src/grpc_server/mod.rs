@@ -70,7 +70,7 @@ pub(crate) async fn grpc_serve(
 
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(CONTROLLER_DESCRIPTOR_SET)
-        .build()
+        .build_v1()
         .map_err(|e| {
             warn!("register grpc reflection failed: {:?} ", e);
             StatusCodeEnum::FatalError
