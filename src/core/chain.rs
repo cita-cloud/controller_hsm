@@ -143,7 +143,7 @@ impl Chain {
             let height = self.block_number + 1;
 
             let (tx_hash_list, quota) = {
-                let mut pool = self.pool.write().await;
+                let pool = self.pool.read().await;
                 let ret = pool.package();
                 let (pool_len, pool_quota) = pool.pool_status();
                 info!(
@@ -301,8 +301,8 @@ impl Chain {
                     if let Some(Tx::UtxoTx(utxo_tx)) = raw_tx.tx.clone() {
                         let res = {
                             let mut auditor = self.auditor.write().await;
-                            auditor.update_system_config(&utxo_tx);
                             let mut pool = self.pool.write().await;
+                            auditor.update_system_config(&utxo_tx);
                             pool.update_system_config(&utxo_tx)
                         };
                         if res {
@@ -322,11 +322,12 @@ impl Chain {
 
             let tx_hash_list =
                 get_tx_hash_list(block.body.as_ref().ok_or(StatusCodeEnum::NoneBlockBody)?)?;
-            self.auditor
-                .write()
-                .await
-                .insert_tx_hash(block_height, tx_hash_list.clone());
-            self.pool.write().await.remove(&tx_hash_list, block_height);
+            {
+                let mut auditor = self.auditor.write().await;
+                let mut pool = self.pool.write().await;
+                auditor.insert_tx_hash(block_height, tx_hash_list.clone());
+                pool.remove(&tx_hash_list, block_height);
+            }
             info!(
                 "update auditor and pool, tx_hash_list len {}",
                 tx_hash_list.len()

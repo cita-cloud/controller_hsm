@@ -237,16 +237,12 @@ impl Controller {
         broadcast: bool,
     ) -> Result<Vec<u8>, StatusCodeEnum> {
         let tx_hash = get_tx_hash(&raw_tx)?.to_vec();
-
-        {
-            let auditor = self.auditor.read().await;
-            auditor.auditor_check(&raw_tx)?;
-        }
-
         crypto_check_async(Arc::new(raw_tx.clone())).await?;
 
         let res = {
+            let auditor = self.auditor.read().await;
             let mut pool = self.pool.write().await;
+            auditor.auditor_check(&raw_tx)?;
             pool.insert(raw_tx.clone())
         };
         if res {
@@ -295,8 +291,8 @@ impl Controller {
         let mut hashes = Vec::new();
         {
             let auditor = self.auditor.read().await;
-            auditor.auditor_check_batch(&raw_txs)?;
             let mut pool = self.pool.write().await;
+            auditor.auditor_check_batch(&raw_txs)?;
             for raw_tx in raw_txs.body.clone() {
                 let hash = get_tx_hash(&raw_tx)?.to_vec();
                 if pool.insert(raw_tx) {
