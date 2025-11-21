@@ -135,7 +135,7 @@ impl Pool {
         });
     }
 
-    pub fn package(&mut self) -> (Vec<Vec<u8>>, u64) {
+    pub fn package(&self) -> (Vec<Vec<u8>>, u64) {
         let system_config = &self.sys_config;
         let mut quota_limit = system_config.quota_limit;
         let mut pack_tx = vec![];
@@ -174,8 +174,8 @@ fn tx_is_valid(sys_config: &SystemConfig, raw_tx: &RawTransaction, height: u64) 
     match &raw_tx.tx {
         Some(Tx::NormalTx(ref normal_tx)) => match normal_tx.transaction {
             Some(ref tx) => {
-                height < tx.valid_until_block
-                    && tx.valid_until_block <= height + sys_config.block_limit
+                height <= tx.valid_until_block
+                    && tx.valid_until_block < height + sys_config.block_limit
             }
             None => false,
         },
