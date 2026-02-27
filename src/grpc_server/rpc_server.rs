@@ -23,7 +23,7 @@ use cita_cloud_proto::{
     blockchain::{Block, CompactBlock, RawTransaction, RawTransactions},
     common::{Empty, Hash, Hashes, NodeNetInfo, NodeStatus, Proof, StateRoot},
     controller::{
-        rpc_service_server::RpcService, BlockNumber, Flag, SystemConfig, TransactionIndex,
+        BlockNumber, Flag, SystemConfig, TransactionIndex, rpc_service_server::RpcService,
     },
     status_code::StatusCodeEnum,
 };

@@ -75,8 +75,6 @@ struct RunOpts {
 }
 
 fn main() {
-    ::std::env::set_var("RUST_BACKTRACE", "full");
-
     let opts: Opts = Opts::parse();
 
     // You can handle information about subcommands by requesting their matches by name

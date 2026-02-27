@@ -17,7 +17,7 @@ use serde_derive::Deserialize;
 use std::collections::HashMap;
 
 use cita_cloud_proto::{
-    blockchain::{raw_transaction::Tx::UtxoTx, RawTransaction, UnverifiedUtxoTransaction},
+    blockchain::{RawTransaction, UnverifiedUtxoTransaction, raw_transaction::Tx::UtxoTx},
     controller::SystemConfig as ProtoSystemConfig,
     status_code::StatusCodeEnum,
     storage::Regions,
@@ -140,7 +140,11 @@ impl SystemConfig {
                             .await
                             != StatusCodeEnum::Success
                         {
-                            panic!("update system config by utxo_tx hash failed: lock_id: {}, utxo_tx hash: 0x{}", lock_id, hex::encode(data_or_tx_hash))
+                            panic!(
+                                "update system config by utxo_tx hash failed: lock_id: {}, utxo_tx hash: 0x{}",
+                                lock_id,
+                                hex::encode(data_or_tx_hash)
+                            )
                         }
                     } else {
                         info!("update system config by data: lock_id: {}", lock_id);
@@ -293,7 +297,7 @@ impl SystemConfig {
             LOCK_ID_VALIDATORS => {
                 let l = self.validator_address_len;
                 let mut validators = Vec::new();
-                if data.len() % l == 0 || self.is_danger {
+                if data.len().is_multiple_of(l) || self.is_danger {
                     for i in 0..(data.len() / l) {
                         validators.push(data[i * l..(i + 1) * l].to_vec())
                     }

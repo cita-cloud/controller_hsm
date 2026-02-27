@@ -57,12 +57,12 @@ use crate::{
     protocol::{
         controller_msg_type::ControllerMsgType,
         node_manager::{
-            chain_status_respond::Respond, ChainStatus, ChainStatusInit, ChainStatusRespond,
-            NodeAddress, NodeManager,
+            ChainStatus, ChainStatusInit, ChainStatusRespond, NodeAddress, NodeManager,
+            chain_status_respond::Respond,
         },
         sync_manager::{
-            sync_block_respond, SyncBlockRequest, SyncBlockRespond, SyncBlocks, SyncManager,
-            SyncTxRequest, SyncTxRespond,
+            SyncBlockRequest, SyncBlockRespond, SyncBlocks, SyncManager, SyncTxRequest,
+            SyncTxRespond, sync_block_respond,
         },
     },
     util::*,
@@ -599,11 +599,11 @@ impl Controller {
                 .await?;
                 if proposal_inner.pre_state_root != pre_state_root {
                     warn!(
-                            "check proposal({}) failed: pre_state_root: 0x{}, local pre_state_root: 0x{}",
-                            block_height,
-                            hex::encode(&proposal_inner.pre_state_root),
-                            hex::encode(&pre_state_root),
-                        );
+                        "check proposal({}) failed: pre_state_root: 0x{}, local pre_state_root: 0x{}",
+                        block_height,
+                        hex::encode(&proposal_inner.pre_state_root),
+                        hex::encode(&pre_state_root),
+                    );
                     return Err(StatusCodeEnum::ProposalCheckError);
                 }
 
@@ -693,7 +693,9 @@ impl Controller {
                 if transactions_root != header.transactions_root {
                     warn!(
                         "check proposal({}) failed: header transactions_root: {}, controller calculate: {}",
-                        block_height, hex::encode(&header.transactions_root), hex::encode(&transactions_root),
+                        block_height,
+                        hex::encode(&header.transactions_root),
+                        hex::encode(&transactions_root),
                     );
                     return Err(StatusCodeEnum::ProposalCheckError);
                 }
@@ -959,7 +961,8 @@ impl Controller {
                             h160_address_check(Some(&node))?;
                             let node_origin = NodeAddress::from(&node);
                             warn!(
-                                "process ChainStatusRespondType failed: remote check chain_status failed: NotSameChain. ban remote node. origin: {}", node_origin
+                                "process ChainStatusRespondType failed: remote check chain_status failed: NotSameChain. ban remote node. origin: {}",
+                                node_origin
                             );
                             self.delete_global_status(&node_origin).await;
                             self.node_manager.set_ban_node(&node_origin).await?;
@@ -1229,7 +1232,7 @@ impl Controller {
                     )
                 });
             }
-            if (!in_sync || global_height % self.config.force_sync_epoch == 0)
+            if (!in_sync || global_height.is_multiple_of(self.config.force_sync_epoch))
                 && self
                     .sync_manager
                     .contains_block(own_status.height + 1)
@@ -1342,9 +1345,7 @@ impl Controller {
                     Ordering::Greater => {
                         error!(
                             "node status rollback: old height: {}, current height: {}. set it misbehavior. origin: {}",
-                            old_cs.height,
-                            current_cs.height,
-                            &na
+                            old_cs.height, current_cs.height, &na
                         );
                         let _ = self.node_manager.set_misbehavior_node(na).await;
                     }
@@ -1432,7 +1433,7 @@ impl Controller {
                         syncing = true;
                     }
                     Err(e) => {
-                        if (e as u64) % 100 == 0 {
+                        if (e as u64).is_multiple_of(100) {
                             warn!("sync block failed: {}", e.to_string());
                             continue;
                         }

@@ -14,7 +14,7 @@
 
 use crate::crypto::hash_data;
 use cita_cloud_proto::{
-    blockchain::{raw_transaction::Tx, BlockHeader, RawTransaction, RawTransactions},
+    blockchain::{BlockHeader, RawTransaction, RawTransactions, raw_transaction::Tx},
     status_code::StatusCodeEnum,
 };
 use cloud_util::common::get_tx_hash;

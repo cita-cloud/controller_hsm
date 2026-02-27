@@ -15,7 +15,7 @@
 use tonic::{Request, Response, Status};
 
 use cita_cloud_proto::{
-    network::{network_msg_handler_service_server::NetworkMsgHandlerService, NetworkMsg},
+    network::{NetworkMsg, network_msg_handler_service_server::NetworkMsgHandlerService},
     status_code::StatusCodeEnum,
 };
 

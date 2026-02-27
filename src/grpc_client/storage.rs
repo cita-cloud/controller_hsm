@@ -16,7 +16,7 @@ use prost::Message;
 
 use cita_cloud_proto::{
     blockchain::{
-        raw_transaction::Tx::UtxoTx, Block, CompactBlock, RawTransaction, RawTransactions,
+        Block, CompactBlock, RawTransaction, RawTransactions, raw_transaction::Tx::UtxoTx,
     },
     client::StorageClientTrait,
     common::{Proof, ProposalInner, StateRoot},

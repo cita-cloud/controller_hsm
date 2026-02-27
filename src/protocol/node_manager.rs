@@ -246,19 +246,24 @@ impl NodeManager {
             rd.get(na).map(|cs| cs.height)
         };
 
-        if current_height.is_none() || new_status.height > current_height.unwrap() {
-            info!(
-                "update node status: origin: {}, height: {}, hash: 0x{}",
-                na,
-                new_status.height,
-                hex::encode(new_status.hash.clone().unwrap().hash)
-            );
-            let mut wr = self.nodes.write().await;
-            Ok(wr.insert(*na, new_status))
-        } else if new_status.height == current_height.unwrap() {
-            Ok(Some(new_status))
-        } else {
-            Err(StatusCodeEnum::EarlyStatus)
+        match current_height {
+            Some(h) if new_status.height <= h => {
+                if new_status.height == h {
+                    Ok(Some(new_status))
+                } else {
+                    Err(StatusCodeEnum::EarlyStatus)
+                }
+            }
+            _ => {
+                info!(
+                    "update node status: origin: {}, height: {}, hash: 0x{}",
+                    na,
+                    new_status.height,
+                    hex::encode(new_status.hash.clone().unwrap().hash)
+                );
+                let mut wr = self.nodes.write().await;
+                Ok(wr.insert(*na, new_status))
+            }
         }
     }
 
