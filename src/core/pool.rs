@@ -21,7 +21,7 @@ use std::{
 };
 
 use cita_cloud_proto::blockchain::{
-    raw_transaction::Tx, RawTransaction, UnverifiedUtxoTransaction,
+    RawTransaction, UnverifiedUtxoTransaction, raw_transaction::Tx,
 };
 use indexmap::IndexSet;
 use tokio::sync::RwLock;
@@ -30,7 +30,7 @@ use crate::{grpc_client::storage::reload_transactions_pool, util::get_tx_quota};
 
 use super::{
     auditor::Auditor,
-    system_config::{SystemConfig, LOCK_ID_BUTTON, LOCK_ID_VERSION},
+    system_config::{LOCK_ID_BUTTON, LOCK_ID_VERSION, SystemConfig},
 };
 
 // wrapper type for Hash
@@ -172,8 +172,8 @@ impl Pool {
 
 fn tx_is_valid(sys_config: &SystemConfig, raw_tx: &RawTransaction, height: u64) -> bool {
     match &raw_tx.tx {
-        Some(Tx::NormalTx(ref normal_tx)) => match normal_tx.transaction {
-            Some(ref tx) => {
+        Some(Tx::NormalTx(normal_tx)) => match &normal_tx.transaction {
+            Some(tx) => {
                 height <= tx.valid_until_block
                     && tx.valid_until_block < height + sys_config.block_limit
             }

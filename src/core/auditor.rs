@@ -19,15 +19,15 @@ use std::{
 
 use cita_cloud_proto::{
     blockchain::{
-        raw_transaction::Tx::{NormalTx, UtxoTx},
         RawTransaction, RawTransactions, Transaction, UnverifiedUtxoTransaction, UtxoTransaction,
+        raw_transaction::Tx::{NormalTx, UtxoTx},
     },
     status_code::StatusCodeEnum,
 };
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 
 use crate::{
-    core::system_config::{SystemConfig, LOCK_ID_BUTTON, LOCK_ID_VERSION},
+    core::system_config::{LOCK_ID_BUTTON, LOCK_ID_VERSION, SystemConfig},
     grpc_client::storage::get_compact_block,
 };
 

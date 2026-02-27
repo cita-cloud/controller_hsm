@@ -17,8 +17,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tonic::{Request, Response, Status};
 
 use cita_cloud_proto::health_check::{
-    health_check_response::ServingStatus, health_server::Health, HealthCheckRequest,
-    HealthCheckResponse,
+    HealthCheckRequest, HealthCheckResponse, health_check_response::ServingStatus,
+    health_server::Health,
 };
 
 use crate::core::controller::Controller;

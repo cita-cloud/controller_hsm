@@ -18,8 +18,8 @@ use tokio::{sync::RwLock, time};
 
 use cita_cloud_proto::{
     blockchain::{
-        raw_transaction::Tx, Block, BlockHeader, CompactBlock, CompactBlockBody, RawTransaction,
-        RawTransactions,
+        Block, BlockHeader, CompactBlock, CompactBlockBody, RawTransaction, RawTransactions,
+        raw_transaction::Tx,
     },
     common::{ConsensusConfiguration, Hash, ProposalInner},
     status_code::StatusCodeEnum,

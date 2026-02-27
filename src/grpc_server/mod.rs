@@ -24,6 +24,7 @@ use tonic::transport::Server;
 use tonic_web::GrpcWebLayer;
 
 use cita_cloud_proto::{
+    CONTROLLER_DESCRIPTOR_SET,
     controller::{
         consensus2_controller_service_server::Consensus2ControllerServiceServer,
         rpc_service_server::RpcServiceServer,
@@ -31,9 +32,8 @@ use cita_cloud_proto::{
     health_check::health_server::HealthServer,
     network::network_msg_handler_service_server::NetworkMsgHandlerServiceServer,
     status_code::StatusCodeEnum,
-    CONTROLLER_DESCRIPTOR_SET,
 };
-use cloud_util::metrics::{run_metrics_exporter, MiddlewareLayer};
+use cloud_util::metrics::{MiddlewareLayer, run_metrics_exporter};
 
 use crate::{
     config::ControllerConfig,

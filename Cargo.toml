@@ -1,38 +1,38 @@
 [package]
 name = "controller"
-version = "6.7.4"
+version = "6.7.5"
 authors = ["Rivtower Technologies <contact@rivtower.com>"]
 license = "Apache-2.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-tonic = "0.12"
-prost = "0.13"
-tokio = { version = "1.41", features = ["full"] }
-rand = "0.8"
-toml = "0.8"
+tonic = "0.14"
+prost = "0.14"
+tokio = { version = "1.49", features = ["full"] }
+rand = "0.10"
+toml = "1.0"
 serde = "1.0"
 serde_derive = "1.0"
 hex = "0.4"
 tower = "0.5"
 tracing = "0.1"
-tonic-reflection = "0.12"
-tonic-web = "0.12"
-statig = { version = "0.3", features = ["async"] }
-flume = "0.11"
-rayon = "1.10"
+tonic-reflection = "0.14"
+tonic-web = "0.14"
+statig = { version = "0.4", features = ["async"] }
+flume = "0.12"
+rayon = "1.11"
 cfg-if = "1.0"
 futures = "0.3"
-indexmap = "2.6"
+indexmap = "2.13"
 
-cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs" }
-cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs" }
+cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs", branch = "update" }
+cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs", branch = "update" }
 
-crypto_sm = { git = "https://github.com/cita-cloud/crypto_sm", package = "crypto", optional = true }
-crypto_eth = { git = "https://github.com/cita-cloud/crypto_eth", package = "crypto", optional = true }
+crypto_sm = { git = "https://github.com/cita-cloud/crypto_sm", package = "crypto", optional = true, branch = "update" }
+crypto_eth = { git = "https://github.com/cita-cloud/crypto_eth", package = "crypto", optional = true, branch = "update" }
 
 [profile.release.package."*"]
 # Set the default for dependencies.

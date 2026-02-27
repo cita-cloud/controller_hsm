@@ -48,18 +48,16 @@ pub struct ControllerStateMachine;
 #[state_machine(
     initial = "State::participate_in_consensus()",
     state(derive(Debug, Clone, PartialEq, Eq)),
-    superstate(derive(Debug, Clone, PartialEq, Eq)),
-    on_transition = "Self::on_transition",
-    on_dispatch = "Self::on_dispatch"
+    superstate(derive(Debug, Clone, PartialEq, Eq))
 )]
 impl ControllerStateMachine {
     #[state]
-    async fn offline(&self) -> Response<State> {
+    async fn offline(&self) -> Outcome<State> {
         Handled
     }
 
     #[superstate]
-    async fn online(&self, context: &Controller, event: &Event) -> Response<State> {
+    async fn online(&self, context: &Controller, event: &Event) -> Outcome<State> {
         debug!("online: `{event:?}`");
         match event {
             Event::SyncBlockReq(req, origin) => {
@@ -89,7 +87,7 @@ impl ControllerStateMachine {
         &self,
         context: &mut Controller,
         event: &Event,
-    ) -> Response<State> {
+    ) -> Outcome<State> {
         debug!("participate_in_consensus: `{event:?}`");
         match event {
             Event::TryUpdateGlobalStatus(node, status) => {
@@ -103,7 +101,7 @@ impl ControllerStateMachine {
     }
 
     #[superstate(superstate = "online", exit_action = "exit_sync")]
-    async fn sync(&self, context: &mut Controller, event: &Event) -> Response<State> {
+    async fn sync(&self, context: &mut Controller, event: &Event) -> Outcome<State> {
         debug!("sync: `{event:?}`");
         match event {
             Event::TryUpdateGlobalStatus(node, status) => {
@@ -117,13 +115,13 @@ impl ControllerStateMachine {
     }
 
     #[state(superstate = "sync")]
-    async fn prepare_sync(&self, event: &Event) -> Response<State> {
+    async fn prepare_sync(&self, event: &Event) -> Outcome<State> {
         debug!("prepare_sync: `{event:?}`");
         Super
     }
 
     #[state(superstate = "sync", entry_action = "enter_syncing")]
-    async fn syncing(&self, event: &Event) -> Response<State> {
+    async fn syncing(&self, event: &Event) -> Outcome<State> {
         debug!("syncing: `{event:?}`");
         Super
     }
@@ -141,19 +139,7 @@ impl ControllerStateMachine {
     }
 }
 
-impl ControllerStateMachine {
-    fn on_transition(&mut self, source: &State, target: &State) {
-        if source != target {
-            info!("transitioned from `{source:?}` to `{target:?}`");
-        }
-    }
-
-    fn on_dispatch(&mut self, state: StateOrSuperstate<Self>, event: &Event) {
-        debug!("dispatching `{event:?}` to `{state:?}`");
-    }
-}
-
-async fn handle_sync_block(context: &Controller) -> statig::Response<State> {
+async fn handle_sync_block(context: &Controller) -> statig::Outcome<State> {
     debug!("receive SyncBlock event");
     let (_, global_status) = context.get_global_status().await;
     let res = {
@@ -167,7 +153,7 @@ async fn handle_sync_block(context: &Controller) -> statig::Response<State> {
     }
 }
 
-async fn try_sync_block(context: &Controller) -> statig::Response<State> {
+async fn try_sync_block(context: &Controller) -> statig::Outcome<State> {
     let (global_address, global_status) = context.get_global_status().await;
 
     let current_height = context.get_status().await.height;
@@ -220,7 +206,7 @@ fn test_state() {
 
 #[tokio::test]
 async fn test() {
-    use crate::{config::ControllerConfig, GenesisBlock, SystemConfig};
+    use crate::{GenesisBlock, SystemConfig, config::ControllerConfig};
 
     let config = ControllerConfig::new("example/config.toml");
     let genesis = GenesisBlock::new("example/config.toml");
